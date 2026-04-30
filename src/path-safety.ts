@@ -13,6 +13,9 @@ export function normalizeVaultRelativePath(input: string, options: { allowEmpty:
   }
 
   const decoded = decodePath(withoutAt);
+  if (path.isAbsolute(decoded) || path.win32.isAbsolute(decoded)) {
+    throw new PathSafetyError("Path must be vault-relative", "ABSOLUTE_PATH");
+  }
   const slashPath = decoded.replace(/\\+/g, "/");
   const rawSegments = slashPath.split("/").filter(Boolean);
   if (rawSegments.some((segment) => segment === ".." || segment === ".")) {
@@ -63,7 +66,7 @@ export function isSafeFolderPath(input: string): boolean {
 
 function decodePath(input: string): string {
   let current = input;
-  for (let i = 0; i < 2; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     try {
       const decoded = decodeURIComponent(current);
       if (decoded === current) return decoded;
@@ -72,5 +75,5 @@ function decodePath(input: string): string {
       throw new PathSafetyError("Path traversal is not allowed", "INVALID_ENCODING");
     }
   }
-  return current;
+  throw new PathSafetyError("Path traversal is not allowed", "INVALID_ENCODING");
 }

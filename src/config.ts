@@ -37,6 +37,15 @@ export interface VaultStatus {
   errors: string[];
 }
 
+export interface WriteVaultStatus {
+  configured: boolean;
+  source: VaultConfig["vaultPathSource"];
+  vaultRoot?: string | undefined;
+  writable: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<VaultConfig> {
   const env = options.env ?? process.env;
   const configPath = options.configPath ?? path.join(homedir(), FALLBACK_CONFIG_PATH);
@@ -98,6 +107,23 @@ export function statusFromConfig(config: VaultConfig): VaultStatus {
   };
   if (config.vaultRoot) status.vaultRoot = config.vaultRoot;
   if (config.vaultTarget) status.vaultTarget = config.vaultTarget;
+  return status;
+}
+
+export async function writeStatusFromConfig(config: VaultConfig): Promise<WriteVaultStatus> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!config.vaultRoot) {
+    if (config.vaultTarget) warnings.push("Writes require a local vaultPath; vault name/id targets are retrieval-only for obsidian_write.");
+    errors.push("Local vault path is required for obsidian_write. Set OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json vaultPath.");
+    return { configured: false, source: config.vaultPathSource, writable: false, errors, warnings };
+  }
+  try {
+    await access(config.vaultRoot, fsConstants.W_OK);
+  } catch {
+    errors.push("Configured vault path is not writable for obsidian_write.");
+  }
+  const status: WriteVaultStatus = { configured: true, source: config.vaultPathSource, vaultRoot: config.vaultRoot, writable: errors.length === 0, errors, warnings };
   return status;
 }
 

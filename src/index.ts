@@ -1,16 +1,20 @@
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "typebox";
-import { loadConfig, statusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
+import { loadConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
+import { obsidianWrite } from "./write-engine.js";
 import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
+import type { ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
 export { loadConfig } from "./config.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
+export { obsidianWrite } from "./write-engine.js";
+export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
   backend?: ObsidianCliBackend | undefined;
@@ -51,6 +55,16 @@ const ObsidianRetrieveParams = Type.Object({
   description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, selected, scope, budget, maxCandidates, explain. Valid modes: auto, search, context, graph, project. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}.",
 });
 
+const ObsidianWriteParams = Type.Object({
+  operation: Type.Optional(Type.String({ description: "Write operation. Supported semantic values are create and append; forbidden operations return safety_refusal." })),
+  path: Type.Optional(Type.String({ description: "Explicit vault-relative Markdown path. obsidian_write never infers destinations from query/topic text." })),
+  content: Type.Optional(Type.String({ description: "Markdown content to create or append exactly as supplied. Must be non-empty for supported operations." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes. Set false only after explicit confirmation." })),
+}, {
+  additionalProperties: false,
+  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create and append. dryRun defaults to true. Paths must be explicit safe vault-relative Markdown paths; no overwrite, delete, rename, move, open UI, shell, network, scan, or arbitrary CLI behavior is supported.",
+});
+
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
   pi.registerTool({
     name: "obsidian_retrieve",
@@ -84,12 +98,34 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     },
   });
 
+  pi.registerTool({
+    name: "obsidian_write",
+    label: "Obsidian Write",
+    description: "Create or append Markdown notes in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve. Supports operation=create or operation=append, path, content, and dryRun. dryRun defaults to true. Never overwrites, deletes, renames, moves, opens the UI, runs shell/network calls, scans the vault, or executes arbitrary CLI commands.",
+    promptSnippet: "Use obsidian_write only for explicit safe Markdown create/append requests. Prefer dryRun=true previews before committing with dryRun=false.",
+    promptGuidelines: [
+      "Use obsidian_write only when the user wants to create a new Markdown note or append to an existing Markdown note at an explicit vault-relative .md path.",
+      "Use obsidian_write with dryRun=true or omitted to preview writes; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "obsidian_write requires operation=create or operation=append, path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
+      "obsidian_write appends Markdown exactly as supplied; include desired leading newlines, headings, or separators in content.",
+      "obsidian_write refuses overwrite, delete, rename, move, open UI, shell, network, scan, and arbitrary CLI requests with safety_refusal.",
+      "Use obsidian_retrieve for reading/searching Obsidian; obsidian_retrieve remains read-only.",
+    ],
+    parameters: ObsidianWriteParams,
+    async execute(_toolCallId: string, params: ObsidianWriteRequest) {
+      const config = await loadConfig(options);
+      const result = await obsidianWrite(params, { vaultRoot: config.vaultRoot });
+      return toolResponse(result);
+    },
+  });
+
   pi.registerCommand("obsidian-vault", {
-    description: "Show configured Obsidian CLI retrieval status",
+    description: "Show configured Obsidian CLI retrieval and write status",
     handler: async (_args: string, ctx: { ui: { notify(message: string, level?: string): void } }) => {
       const backend = await backendFromOptions(options);
       const config = options.backend ? undefined : await loadConfig(options);
       const status = config ? statusFromConfig(config) : undefined;
+      const writeStatus = config ? await writeStatusFromConfig(config) : undefined;
       const health = await backend.checkHealth({ allowAutoLaunch: false });
       const lines = [
         `Obsidian Vault: ${health.available ? "CLI available" : "CLI unavailable"}`,
@@ -98,9 +134,10 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       ];
       if (status?.vaultRoot) lines.push(`Vault path: ${status.vaultRoot}`);
       if (status?.vaultTarget || health.vaultTarget) lines.push(`Vault target: ${status?.vaultTarget ?? health.vaultTarget}`);
-      for (const error of [...(status?.errors ?? []), ...health.errors]) lines.push(`Error: ${error}`);
-      for (const warning of health.warnings) lines.push(`Warning: ${warning}`);
-      ctx.ui.notify(lines.join("\n"), health.available ? "info" : "warning");
+      if (writeStatus) lines.push(`Writes: ${writeStatus.writable ? "available" : "unavailable"}`);
+      for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? [])]) lines.push(`Error: ${error}`);
+      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? [])]) lines.push(`Warning: ${warning}`);
+      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) ? "info" : "warning");
     },
   });
 }

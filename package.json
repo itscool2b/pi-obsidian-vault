@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Pi-focused Obsidian retrieval harness powered by the official Obsidian CLI.",
+  "description": "Pi-focused Obsidian retrieval and safe Markdown writing harness.",
   "license": "MIT",
   "repository": {
     "type": "git",

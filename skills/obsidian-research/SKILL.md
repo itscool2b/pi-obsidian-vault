@@ -1,6 +1,6 @@
 ---
 name: obsidian-research
-description: Retrieve compact Obsidian vault context for research tasks through the single read-only obsidian_retrieve tool.
+description: Retrieve compact Obsidian vault context for research tasks through the read-only obsidian_retrieve tool. Safe writing is handled separately by obsidian_write.
 ---
 
 # Obsidian Research
@@ -30,7 +30,8 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval.
 - Do not use or ask for legacy Obsidian read/search/list/write/open tools.
 - Do not request full vault, full folder, or multi-note dumps.
 - If `agentGuidance.resultState` is `ambiguous` or `no_match`, clarify/refine instead of broadening context.
-- Treat write/open requests as out of scope; `obsidian_retrieve` is read-only.
+- Treat write/open intent as out of scope for retrieval; `obsidian_retrieve` is read-only.
+- For explicit safe Markdown create/append requests, use the separate `obsidian_write` tool with `dryRun` preview first. Do not route writes through retrieval.
 - Prefer `budget: "tiny"` for quick orientation, `budget: "standard"` for normal research, and `budget: "expanded"` only when bounded graph/context detail is needed.
 
 ## Good examples

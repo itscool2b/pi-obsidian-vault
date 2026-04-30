@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
 import { ObsidianCliAdapter } from "../src/obsidian-cli.js";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
+import { obsidianWrite } from "../src/write-engine.js";
 
 describe("real-vault evaluation", () => {
   it.skipIf(process.env.OBSIDIAN_EVAL_VAULT !== "true")("collects redacted retrieval metrics against a configured vault", async () => {
@@ -23,6 +24,25 @@ describe("real-vault evaluation", () => {
       expect(metrics.hasAgentGuidance).toBe(true);
       expect(result.agentGuidance.contextRecommendation.selected.length).toBeLessThanOrEqual(1);
       expect(metrics.usedChars).toBeLessThanOrEqual(metrics.maxChars);
+    }
+  });
+
+  it.skipIf(process.env.OBSIDIAN_EVAL_WRITE !== "true")("previews safe-writing requests against a configured local vault without mutating notes", async () => {
+    const config = await loadConfig();
+    expect(config.vaultRoot).toBeTruthy();
+
+    const createPath = process.env.OBSIDIAN_EVAL_WRITE_CREATE_PATH ?? "_pi_write_smoke/Dry Run Preview.md";
+    const createPreview = await obsidianWrite({ operation: "create", path: createPath, content: "# Pi write smoke dry-run\n", dryRun: true }, { vaultRoot: config.vaultRoot });
+    expect(["preview", "conflict"]).toContain(createPreview.status);
+    expect(createPreview.committed).toBe(false);
+    expect(JSON.stringify(createPreview)).not.toContain(config.vaultRoot);
+
+    const appendPath = process.env.OBSIDIAN_EVAL_WRITE_APPEND_PATH;
+    if (appendPath) {
+      const appendPreview = await obsidianWrite({ operation: "append", path: appendPath, content: "\nPi write smoke dry-run append.\n", dryRun: true }, { vaultRoot: config.vaultRoot });
+      expect(["preview", "missing_target"]).toContain(appendPreview.status);
+      expect(appendPreview.committed).toBe(false);
+      expect(JSON.stringify(appendPreview)).not.toContain(config.vaultRoot);
     }
   });
 });

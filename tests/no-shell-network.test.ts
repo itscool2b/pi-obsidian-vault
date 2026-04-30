@@ -16,6 +16,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
 describe("process safety", () => {
   it("centralizes process spawning in the Obsidian CLI adapter and never uses shell/network APIs", async () => {
     const files = await sourceFiles(path.join(process.cwd(), "src"));
+    const intentionalWriteFiles = new Set(["src/vault-writer.ts", "src/write-engine.ts", "src/write-guidance.ts", "src/write-types.ts"]);
     expect(files.map((file) => path.relative(process.cwd(), file))).toContain("src/agent-guidance.ts");
     for (const file of files) {
       const text = await readFile(file, "utf8");
@@ -25,7 +26,10 @@ describe("process safety", () => {
       }
       expect(text).not.toMatch(/shell:\s*true/);
       expect(text).not.toMatch(/\bfetch\(|https?\.request|net\.connect/);
-      expect(text).not.toMatch(/\b(open|create|append|prepend|rename|delete|move)\s*\(/);
+      if (!intentionalWriteFiles.has(relative)) {
+        expect(text).not.toMatch(/\b(open|create|append|prepend|rename|delete|move)\s*\(/);
+      }
+      expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir)\s*\(/);
     }
   });
 

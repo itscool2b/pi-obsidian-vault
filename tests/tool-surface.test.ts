@@ -14,10 +14,10 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers only obsidian_retrieve and the existing status command", () => {
+  it("registers obsidian_retrieve, obsidian_write, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write"]);
     expect([...pi.commands.keys()]).toEqual(["obsidian-vault"]);
   });
 
@@ -40,6 +40,23 @@ describe("public tool surface", () => {
     expect(surfaceText).toContain('"mode":"context"');
     expect(surfaceText).toContain("tiny, standard, expanded");
     expect(surfaceText).not.toContain('"include"');
+  });
+
+  it("publishes a strict obsidian_write schema without destination inference fields", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const schema = pi.tools.get("obsidian_write").parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
+    expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
+    expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "More", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New", query: "somewhere" })).toBe(false);
+    const surfaceText = [pi.tools.get("obsidian_write").description, pi.tools.get("obsidian_write").promptSnippet, ...(pi.tools.get("obsidian_write").promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/dryRun/i);
+    expect(surfaceText).toMatch(/explicit/i);
+    expect(surfaceText).toMatch(/append/i);
+    expect(surfaceText).toMatch(/overwrite/i);
   });
 
   it("rejects unsupported fields and unsupported budget constants at the schema level", () => {

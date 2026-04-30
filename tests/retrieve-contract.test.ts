@@ -18,7 +18,7 @@ describe("obsidian_retrieve contract", () => {
     const backend = seededFakeCli();
     registerObsidianVault(pi as any, { backend });
 
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write"]);
     expect(pi.commands.has("obsidian-vault")).toBe(true);
     const result = await pi.tools.get("obsidian_retrieve").execute("id", { query: "IG", mode: "search" });
     expect(result.details.candidates[0].path).toBe("Research/Integrated Gradients/index.md");
