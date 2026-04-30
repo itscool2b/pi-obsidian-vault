@@ -10,20 +10,28 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval.
 ## Workflow
 
 1. Start with candidate discovery:
-   - `mode: "search"` or `mode: "auto"`
-   - Include a focused query, alias, tag, property, project phrase, or folder scope.
-2. Review ranked candidates, paths, previews, scores, and match reasons.
-3. Request deeper context only for specific returned paths:
+   - Supported top-level fields are exactly `query`, `mode`, `selected`, `scope`, `budget`, `maxCandidates`, and `explain`.
+   - Valid `mode` values are `auto`, `search`, `context`, `graph`, and `project`.
+   - Valid `budget` values are `tiny`, `standard`, and `expanded`.
+   - Provide a focused query, alias, tag, property, project phrase, or folder scope.
+2. Read `agentGuidance` before raw scores:
+   - `resultState` tells you whether to answer, request context, clarify, or refine.
+   - `bestMatch` identifies the recommended note.
+   - `confidence` explains strength, ambiguity, and degraded signals.
+   - `contextRecommendation.selected` gives the exact selected refs to use when context is recommended.
+3. Request deeper context only for specific returned `selectedRef` paths and only when recommended:
    - `mode: "context"`
-   - `selected: [{ "path": "..." }]`
-4. Use `mode: "graph"` or `mode: "project"` for bounded relationship/project summaries.
+   - `selected: [{ "path": "...", "title": "..." }]`
+4. Use returned context excerpts before making another retrieval call.
+5. Use `mode: "graph"` or `mode: "project"` for bounded relationship/project summaries.
 
 ## Safety rules
 
 - Do not use or ask for legacy Obsidian read/search/list/write/open tools.
 - Do not request full vault, full folder, or multi-note dumps.
+- If `agentGuidance.resultState` is `ambiguous` or `no_match`, clarify/refine instead of broadening context.
 - Treat write/open requests as out of scope; `obsidian_retrieve` is read-only.
-- Prefer `budget: "tiny"` for quick orientation and `budget: "standard"` for normal research.
+- Prefer `budget: "tiny"` for quick orientation, `budget: "standard"` for normal research, and `budget: "expanded"` only when bounded graph/context detail is needed.
 
 ## Good examples
 
@@ -32,5 +40,9 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval.
 ```
 
 ```json
-{ "mode": "context", "query": "implementation", "selected": [{ "path": "Research/Integrated Gradients/index.md" }] }
+{ "query": "Integrated Gradients connections", "mode": "graph", "budget": "expanded" }
+```
+
+```json
+{ "mode": "context", "query": "implementation", "selected": [{ "path": "Research/Integrated Gradients/index.md", "title": "Integrated Gradients" }], "budget": "standard" }
 ```

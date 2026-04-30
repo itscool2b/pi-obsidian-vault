@@ -7,6 +7,7 @@ describe("side-effect refusal", () => {
     const backend = seededFakeCli();
     const result = await obsidianRetrieve(backend, { query: "create and open a note about integrated gradients", mode: "search" });
     expect(result.warnings.join("\n")).toMatch(/read-only/i);
+    expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move"]));
     expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move"]));
   });
 });

@@ -16,6 +16,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
 describe("process safety", () => {
   it("centralizes process spawning in the Obsidian CLI adapter and never uses shell/network APIs", async () => {
     const files = await sourceFiles(path.join(process.cwd(), "src"));
+    expect(files.map((file) => path.relative(process.cwd(), file))).toContain("src/agent-guidance.ts");
     for (const file of files) {
       const text = await readFile(file, "utf8");
       const relative = path.relative(process.cwd(), file);

@@ -13,6 +13,7 @@ import type {
   LinksCommandResult,
   ObsidianCliBackend,
   ObsidianCliHealth,
+  ObsidianCliHealthOptions,
   OptionalPathCommandInput,
   OutlineCommandResult,
   PathCommandInput,
@@ -52,7 +53,11 @@ export interface ObsidianCliAdapterOptions {
   vaultTarget?: string | undefined;
   cwd?: string | undefined;
   timeoutMs?: number | undefined;
+  autoLaunch?: boolean | undefined;
+  launchWaitMs?: number | undefined;
+  obsidianAppPath?: string | undefined;
   runner?: CommandRunner | undefined;
+  launchRunner?: CommandRunner | undefined;
 }
 
 export interface CommandRunOptions {
@@ -81,29 +86,40 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
   private readonly vaultTarget: string | undefined;
   private readonly cwd: string | undefined;
   private readonly timeoutMs: number;
+  private readonly autoLaunch: boolean;
+  private readonly launchWaitMs: number;
+  private readonly obsidianAppPath: string | undefined;
   private readonly runner: CommandRunner;
+  private readonly launchRunner: CommandRunner;
+  private launchPromise: Promise<void> | undefined;
 
   constructor(options: ObsidianCliAdapterOptions = {}) {
     this.cliPath = options.cliPath ?? "obsidian";
     this.vaultTarget = options.vaultTarget;
     this.cwd = options.cwd;
     this.timeoutMs = options.timeoutMs ?? 10_000;
+    this.autoLaunch = options.autoLaunch ?? false;
+    this.launchWaitMs = options.launchWaitMs ?? 2_500;
+    this.obsidianAppPath = options.obsidianAppPath;
     this.runner = options.runner ?? spawnRunner;
+    this.launchRunner = options.launchRunner ?? spawnRunner;
   }
 
-  async checkHealth(): Promise<ObsidianCliHealth> {
+  async checkHealth(options: ObsidianCliHealthOptions = {}): Promise<ObsidianCliHealth> {
     const health: ObsidianCliHealth = { available: false, cliPath: this.cliPath, errors: [], warnings: [] };
     if (this.vaultTarget) health.vaultTarget = this.vaultTarget;
+    const executeOptions = { parseJson: false, allowAutoLaunch: options.allowAutoLaunch ?? false };
     try {
-      const result = await this.execute(["version"], { parseJson: false });
+      const result = await this.execute(["version"], executeOptions);
       health.available = true;
       health.version = firstNonEmptyLine(result.stdout);
       return health;
     } catch (error) {
       health.errors.push(error instanceof Error ? error.message : String(error));
+      if (shouldSkipHealthFallback(error)) return health;
     }
     try {
-      await this.execute(["help"], { parseJson: false });
+      await this.execute(["help"], executeOptions);
       health.available = true;
       return health;
     } catch (error) {
@@ -200,10 +216,11 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
   }
 
   async aliases(input: OptionalPathCommandInput): Promise<AliasesCommandResult> {
-    const args = ["aliases", "format=json"];
+    const args = ["aliases", "verbose"];
     if (input.path) args.push(`path=${normalizeVaultRelativePath(input.path, { allowEmpty: false, requireMarkdown: true })}`);
-    const json = await this.executeJson(args);
-    const rows = arrayFrom(json, ["aliases", "results", "items"]);
+    const result = await this.execute(args, { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = aliasRowsFrom(json, result.stdout);
     const aliases = rows.slice(0, MAX_RECORDS).map((item) => ({ alias: stringFrom(item, ["alias", "name"]), paths: pathsFrom(item, ["paths", "files", "path"]) })).filter((item) => item.alias !== "" && item.paths.length > 0);
     return { aliases, limited: isLimited(json, rows, MAX_RECORDS) };
   }
@@ -213,8 +230,9 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
     if (input.path) args.push(`path=${normalizeVaultRelativePath(input.path, { allowEmpty: false, requireMarkdown: true })}`);
     if (input.counts) args.push("counts");
     if (input.tag) args.push(`name=${input.tag}`);
-    const json = await this.executeJson(args);
-    const rows = arrayFrom(json, ["tags", "results", "items"]);
+    const result = await this.execute(args, { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = tagRowsFrom(json, result.stdout);
     const tags = rows.slice(0, MAX_RECORDS).map((item) => ({ tag: stringFrom(item, ["tag", "name"]), count: numberFrom(item, ["count"]), paths: pathsFrom(item, ["paths", "files", "path"]) })).filter((item) => item.tag !== "");
     return { tags, total: totalFrom(json, rows), limited: isLimited(json, rows, MAX_RECORDS) };
   }
@@ -224,31 +242,35 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
     if (input.path) args.push(`path=${normalizeVaultRelativePath(input.path, { allowEmpty: false, requireMarkdown: true })}`);
     if (input.name) args.push(`name=${input.name}`);
     if (input.counts) args.push("counts");
-    const json = await this.executeJson(args);
-    const rows = arrayFrom(json, ["properties", "results", "items"]);
+    const result = await this.execute(args, { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = propertyRowsFrom(json, result.stdout);
     const properties = rows.slice(0, MAX_RECORDS).map((item) => ({ name: stringFrom(item, ["name", "property", "key"]), value: valueFrom(item, ["value"]), count: numberFrom(item, ["count"]), paths: pathsFrom(item, ["paths", "files", "path"]) })).filter((item) => item.name !== "");
     return { properties, total: totalFrom(json, rows), limited: isLimited(json, rows, MAX_RECORDS) };
   }
 
   async links(input: PathCommandInput): Promise<LinksCommandResult> {
     const path = normalizeVaultRelativePath(input.path, { allowEmpty: false, requireMarkdown: true });
-    const json = await this.executeJson(["links", `path=${path}`, "format=json"]);
-    const rows = arrayFrom(json, ["links", "results", "items"]);
+    const result = await this.execute(["links", `path=${path}`], { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = linkRowsFrom(json, result.stdout);
     const links = rows.slice(0, MAX_RECORDS).map((item) => ({ path: optionalSafeMarkdownPath(pathFrom(item)), rawTarget: maybeString(item, ["rawTarget", "target", "href"]), title: maybeString(item, ["title", "name"]), line: numberFrom(item, ["line", "lineNumber"]) }));
     return { path, links, total: totalFrom(json, rows), limited: isLimited(json, rows, MAX_RECORDS) };
   }
 
   async backlinks(input: PathCommandInput): Promise<BacklinksCommandResult> {
     const path = normalizeVaultRelativePath(input.path, { allowEmpty: false, requireMarkdown: true });
-    const json = await this.executeJson(["backlinks", `path=${path}`, "format=json"]);
-    const rows = arrayFrom(json, ["backlinks", "results", "items"]);
+    const result = await this.execute(["backlinks", `path=${path}`, "format=json"], { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = backlinkRowsFrom(json, result.stdout);
     const backlinks = rows.slice(0, MAX_RECORDS).map((item) => ({ path: safeMarkdownPath(pathFrom(item)), title: maybeString(item, ["title", "name"]), matchedTarget: maybeString(item, ["matchedTarget", "target"]), line: numberFrom(item, ["line", "lineNumber"]), context: maybeString(item, ["context", "snippet", "text"]) })).filter((item) => item.path !== "");
     return { path, backlinks, total: totalFrom(json, rows), limited: isLimited(json, rows, MAX_RECORDS) };
   }
 
   async recents(): Promise<RecentsCommandResult> {
-    const json = await this.executeJson(["recents", "format=json"]);
-    const rows = arrayFrom(json, ["recents", "results", "items"]);
+    const result = await this.execute(["recents"], { parseJson: true });
+    const json = parseJsonOutput(result.stdout);
+    const rows = recentsRowsFrom(json, result.stdout);
     const recents = rows.slice(0, MAX_RECORDS).map((item) => ({ path: safeMarkdownPath(pathFrom(item)), title: maybeString(item, ["title", "name"]), openedAt: maybeString(item, ["openedAt", "time", "modified"]) })).filter((item) => item.path !== "");
     return { recents, total: totalFrom(json, rows), limited: isLimited(json, rows, MAX_RECORDS) };
   }
@@ -273,12 +295,45 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
     }
   }
 
-  private async execute(args: string[], _options: { parseJson: boolean }): Promise<CommandResult> {
+  private async execute(args: string[], options: { parseJson: boolean; allowAutoLaunch?: boolean }): Promise<CommandResult> {
     const built = this.buildCommand(args);
-    const result = await this.runner(built.command, built.args, built.options);
+    let result = await this.runner(built.command, built.args, built.options);
+    const allowAutoLaunch = options.allowAutoLaunch ?? true;
+    if (allowAutoLaunch && this.autoLaunch && shouldTryLaunch(result)) {
+      try {
+        await this.ensureObsidianLaunched();
+        result = await this.runner(built.command, built.args, built.options);
+      } catch (error) {
+        const launchMessage = error instanceof Error ? error.message : String(error);
+        throw new ObsidianCliError(`Obsidian CLI command failed (${args[0]}); auto-launch failed: ${launchMessage}`, "CLI_AUTO_LAUNCH_FAILED");
+      }
+    }
     if (result.timedOut) throw new ObsidianCliError(`Obsidian CLI command timed out: ${args[0]}`, "CLI_TIMEOUT");
     if (result.exitCode !== 0) throw new ObsidianCliError(`Obsidian CLI command failed (${args[0]}): ${result.stderr || result.stdout}`.trim(), "CLI_EXIT");
     return result;
+  }
+
+  private async ensureObsidianLaunched(): Promise<void> {
+    this.launchPromise ??= this.launchObsidianApp();
+    return this.launchPromise;
+  }
+
+  private async launchObsidianApp(): Promise<void> {
+    const attempts = launchCommands(this.cwd, this.vaultTarget, this.obsidianAppPath);
+    const failures: string[] = [];
+    for (const attempt of attempts) {
+      try {
+        const result = await this.launchRunner(attempt.command, attempt.args, { timeoutMs: 5_000, maxBytes: 16_384 });
+        if (!result.timedOut && result.exitCode === 0) {
+          await delay(this.launchWaitMs);
+          return;
+        }
+        failures.push(`${attempt.command}: ${result.stderr || result.stdout || `exit ${result.exitCode}`}`);
+      } catch (error) {
+        failures.push(`${attempt.command}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    throw new ObsidianCliError(`Unable to auto-launch Obsidian (${failures.join("; ")})`, "OBSIDIAN_LAUNCH_FAILED");
   }
 }
 
@@ -316,6 +371,34 @@ export function spawnRunner(command: string, args: string[], options: CommandRun
       resolve({ stdout, stderr, exitCode: code ?? 0, timedOut });
     });
   });
+}
+
+function shouldTryLaunch(result: CommandResult): boolean {
+  if (result.timedOut || result.exitCode === 0) return false;
+  const text = `${result.stderr}\n${result.stdout}`.toLowerCase();
+  return text.includes("unable to find obsidian") || text.includes("make sure obsidian is running");
+}
+
+function shouldSkipHealthFallback(error: unknown): boolean {
+  return error instanceof ObsidianCliError && ["CLI_TIMEOUT", "CLI_AUTO_LAUNCH_FAILED"].includes(error.code);
+}
+
+function launchCommands(cwd: string | undefined, vaultTarget: string | undefined, obsidianAppPath: string | undefined): Array<{ command: string; args: string[] }> {
+  if (obsidianAppPath) return [{ command: obsidianAppPath, args: [] }];
+  const uri = obsidianLaunchUri(cwd, vaultTarget);
+  if (process.platform === "darwin") return [{ command: "open", args: [uri] }, { command: "open", args: ["-a", "Obsidian"] }];
+  if (process.platform === "win32") return [{ command: "cmd.exe", args: ["/c", "start", "", uri] }];
+  return [{ command: "xdg-open", args: [uri] }, { command: "gtk-launch", args: ["obsidian"] }];
+}
+
+function obsidianLaunchUri(cwd: string | undefined, vaultTarget: string | undefined): string {
+  if (cwd) return `obsidian://open?path=${encodeURIComponent(cwd)}`;
+  if (vaultTarget) return `obsidian://open?vault=${encodeURIComponent(vaultTarget)}`;
+  return "obsidian://";
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function safeLimit(value: number): number {
@@ -359,6 +442,53 @@ function fileRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] 
     return json.map((item) => typeof item === "string" ? { path: item } : objectFrom(item));
   }
   const rows = arrayFrom(json, ["files", "results", "items"]);
+  return rows.length > 0 ? rows : linePathRowsFrom(stdout);
+}
+
+function aliasRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map((item) => typeof item === "string" ? { alias: item } : objectFrom(item));
+  const rows = arrayFrom(json, ["aliases", "results", "items"]);
+  if (rows.length > 0) return rows;
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !/^No .* found\.?$/i.test(line)).map((line) => {
+    const [alias, ...paths] = line.split("\t").map((item) => item.trim()).filter(Boolean);
+    return { alias, paths };
+  });
+}
+
+function tagRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map((item) => typeof item === "string" ? { tag: item } : objectFrom(item));
+  const rows = arrayFrom(json, ["tags", "results", "items"]);
+  return rows.length > 0 ? rows : stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !/^No .* found\.?$/i.test(line)).map((line) => ({ tag: line }));
+}
+
+function propertyRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map(objectFrom);
+  const rows = arrayFrom(json, ["properties", "results", "items"]);
+  if (rows.length > 0) return rows;
+  const object = objectFrom(json);
+  const entries = Object.entries(object);
+  if (entries.length > 0) return entries.map(([name, value]) => ({ name, value }));
+  return stdout.split(/\r?\n/).map((line) => line.trim()).filter((line) => line !== "" && !/^No .* found\.?$/i.test(line)).map((line) => {
+    const [name, ...rest] = line.split("\t");
+    return { name, value: rest.join("\t") || undefined };
+  });
+}
+
+function linkRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map((item) => typeof item === "string" ? { path: item, rawTarget: item } : objectFrom(item));
+  const rows = arrayFrom(json, ["links", "results", "items"]);
+  return rows.length > 0 ? rows : linePathRowsFrom(stdout).map((row) => ({ ...row, rawTarget: row.path }));
+}
+
+function backlinkRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map((item) => typeof item === "string" ? { path: item } : objectFrom(item));
+  const rows = arrayFrom(json, ["backlinks", "results", "items"]);
+  return rows.length > 0 ? rows : linePathRowsFrom(stdout);
+}
+
+function recentsRowsFrom(json: unknown, stdout: string): Record<string, unknown>[] {
+  if (Array.isArray(json)) return json.map((item) => typeof item === "string" ? { path: item } : objectFrom(item));
+  const rows = arrayFrom(json, ["recents", "results", "items"]);
   return rows.length > 0 ? rows : linePathRowsFrom(stdout);
 }
 

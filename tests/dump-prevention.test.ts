@@ -7,10 +7,12 @@ describe("dump prevention", () => {
     const backend = seededFakeCli();
     const vault = await obsidianRetrieve(backend, { query: "dump entire vault", mode: "search", budget: "tiny" });
     expect(vault.context).toBeUndefined();
+    expect(vault.agentGuidance.contextRecommendation).toMatchObject({ recommended: false, selected: [], answerScope: "clarify_first" });
     expect(vault.budget.usedChars).toBeLessThanOrEqual(vault.budget.maxChars);
 
     const folder = await obsidianRetrieve(backend, { query: "all project notes", mode: "project", scope: { folder: "Projects" }, budget: "tiny" });
     expect(folder.candidates.length).toBeLessThanOrEqual(5);
+    expect(folder.agentGuidance.contextRecommendation).toMatchObject({ recommended: false, selected: [], answerScope: "clarify_first" });
     expect(JSON.stringify(folder)).not.toContain("# Retrieval Architecture\n## CLI Adapter");
 
     const context = await obsidianRetrieve(backend, { mode: "context", query: "context", budget: "tiny", selected: [

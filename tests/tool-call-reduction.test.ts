@@ -8,9 +8,9 @@ describe("tool-call reduction", () => {
     for (const scenario of knownFailedQueries) {
       const backend = seededFakeCli();
       const discovery = await obsidianRetrieve(backend, { query: scenario.query, mode: "search" });
-      const selected = discovery.candidates[0] ? [{ path: discovery.candidates[0].path, title: discovery.candidates[0].title }] : [];
-      if (selected.length > 0) await obsidianRetrieve(backend, { mode: "context", query: scenario.query, selected });
-      const agentToolCalls = selected.length > 0 ? 2 : 1;
+      const selected = discovery.agentGuidance.contextRecommendation.selected;
+      if (discovery.agentGuidance.contextRecommendation.recommended && selected.length > 0) await obsidianRetrieve(backend, { mode: "context", query: scenario.query, selected });
+      const agentToolCalls = discovery.agentGuidance.contextRecommendation.recommended && selected.length > 0 ? 2 : 1;
       if (agentToolCalls <= 2) successful += 1;
     }
     expect(successful / knownFailedQueries.length).toBeGreaterThanOrEqual(0.85);

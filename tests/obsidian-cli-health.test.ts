@@ -17,9 +17,11 @@ describe("Obsidian CLI health and degraded signals", () => {
   });
 
   it("loads budget configuration and warns when retrieval signals are degraded", async () => {
-    const config = await loadConfig({ env: { OBSIDIAN_VAULT_NAME: "Vault", OBSIDIAN_RETRIEVE_TINY_CHARS: "2500" } });
+    const config = await loadConfig({ env: { OBSIDIAN_VAULT_NAME: "Vault", OBSIDIAN_RETRIEVE_TINY_CHARS: "2500", OBSIDIAN_AUTO_LAUNCH: "false", OBSIDIAN_LAUNCH_WAIT_MS: "750" } });
     expect(config.vaultTarget).toBe("Vault");
     expect(config.budgetChars.tiny).toBe(2500);
+    expect(config.autoLaunch).toBe(false);
+    expect(config.launchWaitMs).toBe(750);
 
     const backend = seededFakeCli();
     backend.aliases = async () => ({ aliases: [], limited: false });

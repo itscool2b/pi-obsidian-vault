@@ -1,5 +1,6 @@
+import { buildAgentGuidance, enrichCandidateForAgent, legacyNextActions } from "./agent-guidance.js";
 import { clip } from "./preview.js";
-import type { BudgetConfig, BudgetProfile, CandidateMetadata, ContextPackage, ContextSection, ObsidianRetrieveOutput, RankedCandidate, RelationshipSummary, ResolvedRetrievalMode } from "./retrieval-types.js";
+import type { BudgetConfig, BudgetProfile, CandidateMetadata, ContextPackage, ContextSection, DegradedSignal, ObsidianRetrieveOutput, RankedCandidate, RelationshipSummary, ResolvedRetrievalMode } from "./retrieval-types.js";
 
 export function budgetForProfile(profile: BudgetProfile | undefined, overrides?: Partial<Record<BudgetProfile, number>>): BudgetConfig {
   const resolved = profile ?? "standard";
@@ -32,15 +33,18 @@ export function packCandidateResponse(input: {
   profile: BudgetProfile;
   warnings?: string[] | undefined;
   nextActions?: string[] | undefined;
+  degradedSignals?: DegradedSignal[] | undefined;
 }): ObsidianRetrieveOutput {
   const candidates = input.candidates.slice(0, input.budget.candidateLimit).map((candidate) => compactCandidate(candidate, input.budget));
+  const guidance = buildAgentGuidance({ mode: input.mode, query: input.query, candidates, warnings: input.warnings, degradedSignals: input.degradedSignals });
   return fitOutput({
     mode: input.mode,
     query: input.query,
     candidates,
     budget: { profile: input.profile, maxChars: input.budget.totalChars, usedChars: 0, truncated: false, omissions: [] },
     warnings: input.warnings ?? [],
-    nextActions: input.nextActions ?? defaultNextActions(input.mode),
+    nextActions: input.nextActions ?? legacyNextActions(guidance),
+    agentGuidance: guidance,
   }, input.budget.totalChars);
 }
 
@@ -53,6 +57,7 @@ export function packContextResponse(input: {
   budget: BudgetConfig;
   profile: BudgetProfile;
   warnings?: string[] | undefined;
+  degradedSignals?: DegradedSignal[] | undefined;
 }): ObsidianRetrieveOutput {
   const context: ContextPackage[] = [];
   for (const candidate of input.candidates.slice(0, input.budget.selectedNoteLimit)) {
@@ -73,14 +78,17 @@ export function packContextResponse(input: {
     if (sections.some((section) => section.truncated)) pkg.omissions.push("one or more sections were clipped to budget");
     context.push(pkg);
   }
+  const candidates = input.candidates.slice(0, input.budget.candidateLimit).map((candidate) => compactCandidate(candidate, input.budget));
+  const guidance = buildAgentGuidance({ mode: "context", query: input.query, candidates, contextReturned: context.length > 0, warnings: input.warnings, degradedSignals: input.degradedSignals });
   return fitOutput({
     mode: "context",
     query: input.query,
-    candidates: input.candidates.slice(0, input.budget.candidateLimit).map((candidate) => compactCandidate(candidate, input.budget)),
+    candidates,
     context,
     budget: { profile: input.profile, maxChars: input.budget.totalChars, usedChars: 0, truncated: false, omissions: [] },
     warnings: input.warnings ?? [],
-    nextActions: ["Use returned excerpts before asking for more context; request another candidate path only if needed."],
+    nextActions: legacyNextActions(guidance),
+    agentGuidance: guidance,
   }, input.budget.totalChars);
 }
 
@@ -92,15 +100,19 @@ export function packGraphResponse(input: {
   budget: BudgetConfig;
   profile: BudgetProfile;
   warnings?: string[] | undefined;
+  degradedSignals?: DegradedSignal[] | undefined;
 }): ObsidianRetrieveOutput {
+  const candidates = input.candidates.slice(0, input.budget.candidateLimit).map((candidate) => compactCandidate(candidate, input.budget));
+  const guidance = buildAgentGuidance({ mode: input.mode, query: input.query, candidates, warnings: input.warnings, degradedSignals: input.degradedSignals });
   return fitOutput({
     mode: input.mode,
     query: input.query,
-    candidates: input.candidates.slice(0, input.budget.candidateLimit).map((candidate) => compactCandidate(candidate, input.budget)),
+    candidates,
     graph: compactGraph(input.graph, input.budget),
     budget: { profile: input.profile, maxChars: input.budget.totalChars, usedChars: 0, truncated: false, omissions: [] },
     warnings: input.warnings ?? [],
-    nextActions: ["Select one returned candidate and request context for bounded excerpts."],
+    nextActions: legacyNextActions(guidance),
+    agentGuidance: guidance,
   }, input.budget.totalChars);
 }
 
@@ -108,27 +120,104 @@ function fitOutput(output: ObsidianRetrieveOutput, maxChars: number): ObsidianRe
   let next = output;
   let chars = measure(next);
   const omissions = [...next.budget.omissions];
+  if (chars > maxChars) {
+    next = stripCandidateLowPriorityDetails(next);
+    omissions.push("low-priority candidate details clipped to fit response budget");
+    chars = measure(next);
+  }
   while (chars > maxChars && next.candidates.length > 1) {
-    next = { ...next, candidates: next.candidates.slice(0, -1) };
+    next = alignGuidanceToCandidates({ ...next, candidates: next.candidates.slice(0, -1) });
     omissions.push("candidate omitted to fit response budget");
     chars = measure(next);
   }
   if (chars > maxChars && next.context && next.context.length > 0) {
-    next = { ...next, context: next.context.slice(0, 1).map((pkg) => ({ ...pkg, sections: pkg.sections.slice(0, 1), omissions: [...pkg.omissions, "context clipped to fit response budget"] })) };
+    next = stripContextLowPriorityDetails(next);
+    omissions.push("low-priority context metadata clipped to fit response budget");
+    chars = measure(next);
+  }
+  if (chars > maxChars && next.context && next.context.length > 0) {
+    next = { ...next, context: next.context.slice(0, 1).map((pkg) => {
+      const sections = pkg.sections.slice(0, Math.max(1, Math.min(2, pkg.sections.length)));
+      return { ...pkg, sections, usedChars: sections.reduce((sum, section) => sum + section.excerpt.length, 0), omissions: [...pkg.omissions, "context clipped to fit response budget"] };
+    }) };
     omissions.push("context clipped to fit response budget");
+    chars = measure(next);
+  }
+  if (chars > maxChars) {
+    next = minimizeOutputForBudget(next);
+    omissions.push("low-priority details clipped to fit response budget");
     chars = measure(next);
   }
   const truncated = omissions.length > 0 || chars > maxChars;
   return { ...next, budget: { ...next.budget, usedChars: Math.min(chars, maxChars), truncated, omissions: [...new Set(omissions)] } };
 }
 
+function stripCandidateLowPriorityDetails(output: ObsidianRetrieveOutput): ObsidianRetrieveOutput {
+  const candidates = output.candidates.map((candidate, index) => ({
+    ...candidate,
+    preview: clip(candidate.preview, 80),
+    matchReasons: candidate.matchReasons.slice(0, 2),
+    matchSummary: candidate.matchSummary ? { headline: candidate.matchSummary.headline, signals: candidate.matchSummary.signals.slice(0, 2) } : candidate.matchSummary,
+    metadata: index === 0 ? candidate.metadata : {},
+  }));
+  return alignGuidanceToCandidates({ ...output, candidates });
+}
+
+function stripContextLowPriorityDetails(output: ObsidianRetrieveOutput): ObsidianRetrieveOutput {
+  const candidates = output.candidates.map((candidate) => ({
+    ...candidate,
+    preview: clip(candidate.preview, 80),
+    matchReasons: candidate.matchReasons.slice(0, 2),
+    matchSummary: candidate.matchSummary ? { headline: candidate.matchSummary.headline, signals: candidate.matchSummary.signals.slice(0, 2) } : candidate.matchSummary,
+    metadata: {},
+  }));
+  const context = output.context?.map((pkg) => ({
+    ...pkg,
+    metadata: {},
+    relationships: undefined,
+    omissions: [...pkg.omissions, "metadata removed to preserve selected excerpts"],
+  }));
+  return alignGuidanceToCandidates({ ...output, candidates, context });
+}
+
+function minimizeOutputForBudget(output: ObsidianRetrieveOutput): ObsidianRetrieveOutput {
+  const candidates = output.candidates.slice(0, 1).map((candidate) => ({
+    ...candidate,
+    preview: clip(candidate.preview, 80),
+    matchReasons: candidate.matchReasons.slice(0, 1),
+    matchSummary: candidate.matchSummary ? { headline: candidate.matchSummary.headline, signals: candidate.matchSummary.signals.slice(0, 1) } : candidate.matchSummary,
+    metadata: {},
+  }));
+  const context = output.context?.slice(0, 1).map((pkg) => ({
+    path: pkg.path,
+    title: pkg.title,
+    selectedReason: pkg.selectedReason,
+    sections: pkg.sections.slice(0, 1).map((section) => ({ ...section, excerpt: clip(section.excerpt, 300), truncated: true })),
+    metadata: {},
+    omissions: [...pkg.omissions, "context minimized to fit response budget"],
+    usedChars: Math.min(pkg.sections[0]?.excerpt.length ?? pkg.usedChars, 300),
+  }));
+  const minimized: ObsidianRetrieveOutput = { ...output, candidates };
+  if (context) minimized.context = context;
+  return alignGuidanceToCandidates(minimized);
+}
+
+function alignGuidanceToCandidates(output: ObsidianRetrieveOutput): ObsidianRetrieveOutput {
+  const candidatePaths = new Set(output.candidates.map((candidate) => candidate.path));
+  const agentGuidance = {
+    ...output.agentGuidance,
+    alternatives: output.agentGuidance.alternatives.filter((candidate) => candidatePaths.has(candidate.path)),
+  };
+  return { ...output, agentGuidance };
+}
+
 function compactCandidate(candidate: RankedCandidate, budget: BudgetConfig): RankedCandidate {
-  return {
+  return enrichCandidateForAgent({
     ...candidate,
     preview: clip(candidate.preview, budget.previewChars),
     matchReasons: candidate.matchReasons.slice(0, budget.metadataItems),
     metadata: compactMetadata(candidate.metadata, budget),
-  };
+  }, { signalLimit: budget.metadataItems });
 }
 
 function compactMetadata(metadata: CandidateMetadata, budget: BudgetConfig): CandidateMetadata {
@@ -154,11 +243,6 @@ function compactGraph(graph: RelationshipSummary, budget: BudgetConfig): Relatio
   if (graph.sharedProperties) compact.sharedProperties = graph.sharedProperties.slice(0, budget.graphNeighbors);
   if (graph.projectHubs) compact.projectHubs = graph.projectHubs.slice(0, budget.graphNeighbors);
   return compact;
-}
-
-function defaultNextActions(mode: ResolvedRetrievalMode): string[] {
-  if (mode === "search") return ["Select a candidate path and call obsidian_retrieve with mode=context for bounded excerpts."];
-  return ["Use candidate paths for follow-up context if needed."];
 }
 
 function measure(output: ObsidianRetrieveOutput): number {

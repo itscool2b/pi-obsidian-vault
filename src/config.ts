@@ -1,9 +1,12 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { access, readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 import type { BudgetProfile } from "./retrieval-types.js";
 
 const FALLBACK_CONFIG_PATH = ".pi/agent/obsidian-vault.json";
+
+type ConfigFile = Record<string, unknown>;
 
 export interface LoadConfigOptions {
   env?: Record<string, string | undefined>;
@@ -16,6 +19,9 @@ export interface VaultConfig {
   vaultRoot?: string | undefined;
   cliPath: string;
   cliTimeoutMs: number;
+  autoLaunch: boolean;
+  launchWaitMs: number;
+  obsidianAppPath?: string | undefined;
   vaultTarget?: string | undefined;
   defaultBudget: BudgetProfile;
   budgetChars: Record<BudgetProfile, number>;
@@ -35,22 +41,16 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
   const env = options.env ?? process.env;
   const configPath = options.configPath ?? path.join(homedir(), FALLBACK_CONFIG_PATH);
   const errors: string[] = [];
-  const vaultTarget = env.OBSIDIAN_VAULT_ID?.trim() || env.OBSIDIAN_VAULT_NAME?.trim() || undefined;
-
-  let rawVaultPath = env.OBSIDIAN_VAULT_PATH?.trim();
-  let vaultPathSource: VaultConfig["vaultPathSource"] = rawVaultPath ? "env" : "missing";
-
-  if (!rawVaultPath) {
-    try {
-      const parsed = JSON.parse(await readFile(configPath, "utf8")) as { vaultPath?: unknown };
-      if (typeof parsed.vaultPath === "string" && parsed.vaultPath.trim() !== "") {
-        rawVaultPath = parsed.vaultPath.trim();
-        vaultPathSource = "config";
-      }
-    } catch {
-      // Missing fallback config is normal. Surface an actionable error below.
-    }
-  }
+  const fileConfig = await readConfigFile(configPath);
+  const envVaultPath = env.OBSIDIAN_VAULT_PATH?.trim();
+  const rawVaultPath = envVaultPath || stringFromConfig(fileConfig, "vaultPath");
+  const vaultPathSource: VaultConfig["vaultPathSource"] = envVaultPath ? "env" : rawVaultPath ? "config" : "missing";
+  const vaultTarget = env.OBSIDIAN_VAULT_ID?.trim()
+    || env.OBSIDIAN_VAULT_NAME?.trim()
+    || stringFromConfig(fileConfig, "vaultId")
+    || stringFromConfig(fileConfig, "vaultName")
+    || stringFromConfig(fileConfig, "vaultTarget")
+    || undefined;
 
   let vaultRoot: string | undefined;
   if (rawVaultPath) {
@@ -66,22 +66,26 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
       errors.push(`Vault path is not accessible: ${rawVaultPath} (${error instanceof Error ? error.message : String(error)})`);
     }
   } else if (!vaultTarget) {
-    errors.push("Vault path is not configured. Set OBSIDIAN_VAULT_PATH, OBSIDIAN_VAULT_NAME, or OBSIDIAN_VAULT_ID.");
+    errors.push(`Vault path is not configured. Set OBSIDIAN_VAULT_PATH, OBSIDIAN_VAULT_NAME, or OBSIDIAN_VAULT_ID, or create ~/${FALLBACK_CONFIG_PATH} with { "vaultPath": "/absolute/path/to/vault" }.`);
   }
 
-  const cliPath = env.OBSIDIAN_CLI_PATH?.trim() || "obsidian";
-  const cliTimeoutMs = clampNumber(parseInteger(env.OBSIDIAN_CLI_TIMEOUT_MS), 1_000, 60_000, 10_000);
-  const defaultBudget = parseBudget(env.OBSIDIAN_RETRIEVE_BUDGET) ?? "standard";
+  const cliPath = env.OBSIDIAN_CLI_PATH?.trim() || stringFromConfig(fileConfig, "cliPath") || await defaultCliPath(env);
+  const cliTimeoutMs = clampNumber(parseInteger(env.OBSIDIAN_CLI_TIMEOUT_MS) ?? integerFromConfig(fileConfig, "cliTimeoutMs"), 1_000, 60_000, 10_000);
+  const autoLaunch = parseBoolean(env.OBSIDIAN_AUTO_LAUNCH) ?? booleanFromConfig(fileConfig, "autoLaunch") ?? false;
+  const launchWaitMs = clampNumber(parseInteger(env.OBSIDIAN_LAUNCH_WAIT_MS) ?? integerFromConfig(fileConfig, "launchWaitMs"), 250, 15_000, 4_000);
+  const obsidianAppPath = env.OBSIDIAN_APP_PATH?.trim() || stringFromConfig(fileConfig, "obsidianAppPath") || undefined;
+  const defaultBudget = parseBudget(env.OBSIDIAN_RETRIEVE_BUDGET) ?? parseBudget(stringFromConfig(fileConfig, "defaultBudget")) ?? "standard";
   const budgetChars: Record<BudgetProfile, number> = {
     tiny: clampNumber(parseInteger(env.OBSIDIAN_RETRIEVE_TINY_CHARS), 1_000, 12_000, 3_500),
     standard: clampNumber(parseInteger(env.OBSIDIAN_RETRIEVE_STANDARD_CHARS), 2_000, 12_000, 8_000),
     expanded: clampNumber(parseInteger(env.OBSIDIAN_RETRIEVE_EXPANDED_CHARS), 4_000, 12_000, 12_000),
   };
 
-  const config: VaultConfig = { vaultPathSource, cliPath, cliTimeoutMs, defaultBudget, budgetChars, errors };
+  const config: VaultConfig = { vaultPathSource, cliPath, cliTimeoutMs, autoLaunch, launchWaitMs, defaultBudget, budgetChars, errors };
   if (rawVaultPath) config.rawVaultPath = rawVaultPath;
   if (vaultRoot) config.vaultRoot = vaultRoot;
   if (vaultTarget) config.vaultTarget = vaultTarget;
+  if (obsidianAppPath) config.obsidianAppPath = obsidianAppPath;
   return config;
 }
 
@@ -97,6 +101,53 @@ export function statusFromConfig(config: VaultConfig): VaultStatus {
   return status;
 }
 
+async function readConfigFile(configPath: string): Promise<ConfigFile> {
+  try {
+    const parsed = JSON.parse(await readFile(configPath, "utf8")) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as ConfigFile : {};
+  } catch {
+    // Missing fallback config is normal. Surface an actionable vault error separately.
+    return {};
+  }
+}
+
+async function defaultCliPath(env: Record<string, string | undefined>): Promise<string> {
+  return await executableInPath("obsidian-cli", env.PATH) ? "obsidian-cli" : "obsidian";
+}
+
+async function executableInPath(binary: string, pathValue: string | undefined): Promise<boolean> {
+  if (!pathValue) return false;
+  const names = process.platform === "win32" ? [binary, `${binary}.exe`, `${binary}.cmd`, `${binary}.bat`] : [binary];
+  for (const directory of pathValue.split(path.delimiter).filter(Boolean)) {
+    for (const name of names) {
+      try {
+        await access(path.join(directory, name), fsConstants.X_OK);
+        return true;
+      } catch {
+        // Keep searching PATH.
+      }
+    }
+  }
+  return false;
+}
+
+function stringFromConfig(config: ConfigFile, key: string): string | undefined {
+  const value = config[key];
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function integerFromConfig(config: ConfigFile, key: string): number | undefined {
+  const value = config[key];
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+  return typeof value === "string" ? parseInteger(value) : undefined;
+}
+
+function booleanFromConfig(config: ConfigFile, key: string): boolean | undefined {
+  const value = config[key];
+  if (typeof value === "boolean") return value;
+  return typeof value === "string" ? parseBoolean(value) : undefined;
+}
+
 function parseInteger(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number.parseInt(value, 10);
@@ -110,5 +161,13 @@ function clampNumber(value: number | undefined, min: number, max: number, fallba
 
 function parseBudget(value: string | undefined): BudgetProfile | undefined {
   if (value === "tiny" || value === "standard" || value === "expanded") return value;
+  return undefined;
+}
+
+function parseBoolean(value: string | undefined): boolean | undefined {
+  if (!value) return undefined;
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) return true;
+  if (["0", "false", "no", "off"].includes(normalized)) return false;
   return undefined;
 }

@@ -21,4 +21,23 @@ describe("ranking signals", () => {
       expect(result.candidates[0]?.availableSignals, item.query).toContain(item.signal);
     }
   });
+
+  it("prefers exact phrases and meaningful title evidence over weak isolated tokens", async () => {
+    const result = await obsidianRetrieve(seededFakeCli(), { query: "per-step integrated gradients", mode: "search", budget: "standard" });
+
+    expect(result.candidates[0]?.path).toBe("Research/Integrated Gradients/Per-Step IG.md");
+    const weakDistractorIndex = result.candidates.findIndex((candidate) => candidate.path === "Archive/Per Token Distractor.md");
+    expect(weakDistractorIndex === -1 || weakDistractorIndex > 0).toBe(true);
+    expect(result.candidates[0]?.matchReasons.some((reason) => reason.quality === "strong" && /step integrated gradients|Per-Step Integrated Gradients/i.test(reason.evidence))).toBe(true);
+  });
+
+  it("ranks exact phrase candidates above separated-token distractors", async () => {
+    const backend = seededFakeCli();
+    backend.addNote({ path: "Research/Phrase Target.md", title: "Phrase Target", content: "# Phrase Target\nalpha beta gamma appears together here." });
+    backend.addNote({ path: "Research/Separated Tokens.md", title: "Separated Tokens", content: "# Separated Tokens\nalpha appears early. beta appears later. gamma appears at the end." });
+
+    const result = await obsidianRetrieve(backend, { query: "alpha beta gamma", mode: "search", budget: "standard" });
+
+    expect(result.candidates[0]?.path).toBe("Research/Phrase Target.md");
+  });
 });

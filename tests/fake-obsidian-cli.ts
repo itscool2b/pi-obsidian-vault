@@ -213,7 +213,7 @@ export function seededFakeCli(): FakeObsidianCliBackend {
     modified: "2026-04-20T10:00:00Z",
     openedAt: "2026-04-28T10:00:00Z",
     links: ["Research/Integrated Gradients/Roadmap.md", "Papers/Axiomatic Attribution.md"],
-    content: "# Integrated Gradients\nCore note about integrated gradients for attribution.\n## Month 3\nCompare expected gradients and saliency maps.\n## Implementation\nUse path integral baselines and attribution tests.",
+    content: "# Integrated Gradients\nCore note about integrated gradients for attribution.\n## Overview\nCompare expected gradients and saliency maps.\n## Implementation\nUse path integral baselines and attribution tests.",
   });
   cli.addNote({
     path: "Research/Integrated Gradients/Roadmap.md",
@@ -224,6 +224,32 @@ export function seededFakeCli(): FakeObsidianCliBackend {
     modified: "2026-04-22T10:00:00Z",
     links: ["Research/Integrated Gradients/index.md"],
     content: "# Roadmap\n## Month 1\nRead attribution papers.\n## Month 3\nShip integrated gradients demo and write evaluation notes.",
+  });
+  cli.addNote({
+    path: "Research/Integrated Gradients/Per-Step IG.md",
+    title: "Per-Step Integrated Gradients",
+    aliases: ["Per-Step IG"],
+    tags: ["per-step"],
+    properties: { status: "draft", technique: "per-step attribution" },
+    links: ["Research/Integrated Gradients/index.md"],
+    content: "# Per-Step Integrated Gradients\nPer-step integrated gradients records attribution at each optimization step.\n## Procedure\nCompute per-step integrated gradients and compare the step attribution deltas.",
+  });
+  cli.addNote({
+    path: "MOCs/Integrated Gradients MOC.md",
+    title: "Integrated Gradients MOC",
+    aliases: ["IG MOC"],
+    tags: ["moc", "attribution"],
+    properties: { project: "Interpretability", hub: "MOC" },
+    links: ["Research/Integrated Gradients/index.md", "Research/Integrated Gradients/Per-Step IG.md"],
+    content: "# Integrated Gradients MOC\nMap of content for integrated gradients research.\n## Connections\nLinks to per-step integrated gradients, axiomatic attribution, and roadmap notes.",
+  });
+  cli.addNote({
+    path: "MOCs/CS EE MOC.md",
+    title: "CS EE MOC",
+    aliases: ["Computer Science Electrical Engineering MOC"],
+    tags: ["moc", "cs", "ee"],
+    properties: { hub: "General CS EE" },
+    content: "# CS EE MOC\nGeneral MOC for computer science and electrical engineering notes.\n## Connections\nBroad connections around courses, systems, and hardware.",
   });
   cli.addNote({
     path: "Papers/Axiomatic Attribution.md",
@@ -253,11 +279,42 @@ export function seededFakeCli(): FakeObsidianCliBackend {
     content: "# Retrieval Architecture\n## CLI Adapter\nAll discovery flows through read-only Obsidian CLI commands.\n## Context Packer\nNever dump a folder or full vault.",
   });
   cli.addNote({
+    path: "Projects/Project Narrative.md",
+    title: "Project Narrative",
+    aliases: ["Narrative"],
+    tags: ["project", "narrative"],
+    properties: { project: "Pi", status: "active" },
+    content: "# Project Narrative\nThis note introduces the project narrative and why the work matters.\n## Background\nThis section says what the project is without timeline details. It has general context and information.\n## Progress Timeline\nThe project progressed from smoke testing to retrieval ranking hardening. Progress milestones include fixing weak token matches, improving confidence, and refining context section selection.\n## Current State\nThe current project state is a safe read-only retrieval extension with candidate-first context selection.",
+  });
+  cli.addNote({
+    path: "Projects/Alpha Ranking Quality.md",
+    title: "Ranking Quality Alpha",
+    aliases: ["Ranking Alpha"],
+    tags: ["ranking", "quality"],
+    properties: { project: "Ranking", status: "active" },
+    content: "# Ranking Quality Alpha\nStrong candidate about ranking quality ambiguity.",
+  });
+  cli.addNote({
+    path: "Projects/Beta Ranking Quality.md",
+    title: "Ranking Quality Beta",
+    aliases: ["Ranking Beta"],
+    tags: ["ranking", "quality"],
+    properties: { project: "Ranking", status: "active" },
+    content: "# Ranking Quality Beta\nStrong candidate about ranking quality ambiguity.",
+  });
+  cli.addNote({
     path: "Archive/WeakBody.md",
     title: "Weak Body Baseline",
     tags: ["archive"],
     properties: { status: "archived" },
     content: "# Weak Body Baseline\nLegacy note with weak body content but a distinctive filename.",
+  });
+  cli.addNote({
+    path: "Archive/Per Token Distractor.md",
+    title: "Per Token Distractor",
+    tags: ["archive"],
+    properties: { status: "archived" },
+    content: `# Per Token Distractor\n${"per ".repeat(80)}This note repeats only the isolated weak token and is unrelated to attribution.`,
   });
   return cli;
 }
@@ -268,6 +325,7 @@ export const knownFailedQueries = [
   { query: "Interpretability", expectedPath: "Research/Integrated Gradients/index.md", category: "property" },
   { query: "Month 3", expectedPath: "Research/Integrated Gradients/Roadmap.md", category: "heading" },
   { query: "Obsidian Retrieval Harness", expectedPath: "Projects/Pi Obsidian Harness.md", category: "alias" },
+  { query: "per-step integrated gradients", expectedPath: "Research/Integrated Gradients/Per-Step IG.md", category: "phrase_title" },
 ];
 
 export const baselineFirstResponseChars = 25_000;

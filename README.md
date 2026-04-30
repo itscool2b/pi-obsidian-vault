@@ -14,10 +14,47 @@ It also registers the existing status command:
 
 Legacy read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/open intent and never performs side effects.
 
-## Configuration
+## First-time setup
+
+1. Make the vault location persistent for Pi. The simplest option is:
+
+```bash
+mkdir -p ~/.pi/agent
+cat > ~/.pi/agent/obsidian-vault.json <<'JSON'
+{
+  "vaultPath": "/absolute/path/to/vault",
+  "cliPath": "obsidian-cli"
+}
+JSON
+```
+
+Replace `/absolute/path/to/vault` with your real vault folder, then run `/obsidian-vault` in Pi. The status command is side-effect-free: it reports whether the CLI can reach a running Obsidian instance, but it does not open Obsidian. If `obsidian` opens the desktop app on your system, use `obsidian-cli` for `cliPath`/`OBSIDIAN_CLI_PATH`.
+
+### Pi-assisted setup prompt
+
+You can also ask Pi to create the config for you. Paste this into Pi after replacing the vault path:
+
+```text
+Set up the Obsidian retrieval extension.
+
+My Obsidian vault path is:
+
+/replace/with/path/to/vault
+
+Please:
+1. Create or update ~/.pi/agent/obsidian-vault.json.
+2. Set "vaultPath" to the path above.
+3. Prefer "cliPath": "obsidian-cli" if obsidian-cli exists on PATH; otherwise ask me before using any other CLI path.
+4. Verify the vault path exists and is a directory.
+5. Do not scan, read, modify, open, or write any notes in the vault.
+6. After setup, tell me whether I need to restart Pi.
+7. Ask me to run /obsidian-vault and confirm it shows Source: config.
+```
+
+You can also configure through environment variables:
 
 ```env
-OBSIDIAN_CLI_PATH=obsidian
+OBSIDIAN_CLI_PATH=obsidian-cli
 OBSIDIAN_VAULT_PATH=/absolute/path/to/vault
 # or
 OBSIDIAN_VAULT_NAME="My Vault"
@@ -30,9 +67,14 @@ OBSIDIAN_RETRIEVE_STANDARD_CHARS=8000
 OBSIDIAN_RETRIEVE_EXPANDED_CHARS=12000
 ```
 
-When a vault name/id is configured, the adapter invokes the CLI as `obsidian vault=<target> <command> ...`. Otherwise it runs the CLI with `cwd` set to `OBSIDIAN_VAULT_PATH`.
+When a vault name/id is configured, the adapter invokes the configured CLI as `<cliPath> vault=<target> <command> ...`. Otherwise it runs the CLI with `cwd` set to `OBSIDIAN_VAULT_PATH` or the path saved in `~/.pi/agent/obsidian-vault.json`.
 
 ## Usage examples
+
+Supported top-level request fields are exactly: `query`, `mode`, `selected`, `scope`, `budget`, `maxCandidates`, and `explain`.
+
+Valid `mode` values: `auto`, `search`, `context`, `graph`, `project`.
+Valid `budget` values: `tiny`, `standard`, `expanded`.
 
 Candidate discovery:
 
@@ -40,20 +82,44 @@ Candidate discovery:
 { "query": "integrated gradients", "mode": "search", "budget": "standard" }
 ```
 
-Selected-note context:
+Graph retrieval:
+
+```json
+{ "query": "Integrated Gradients connections", "mode": "graph", "budget": "expanded" }
+```
+
+Selected-note context using the exact `selectedRef` recommended by `agentGuidance.contextRecommendation`:
 
 ```json
 {
   "mode": "context",
   "query": "implementation details",
-  "selected": [{ "path": "Research/Integrated Gradients/index.md" }]
+  "selected": [{ "path": "Research/Integrated Gradients/index.md", "title": "Integrated Gradients" }],
+  "budget": "standard"
 }
 ```
 
-Graph/project retrieval:
+Agent-facing guidance is returned on every successful response:
 
 ```json
-{ "query": "Pi retrieval architecture", "mode": "project", "scope": { "folder": "Projects" } }
+{
+  "agentGuidance": {
+    "resultState": "request_context",
+    "bestMatch": { "path": "Research/Integrated Gradients/index.md", "title": "Integrated Gradients" },
+    "confidence": { "level": "high", "ambiguous": false },
+    "contextRecommendation": {
+      "recommended": true,
+      "selected": [{ "path": "Research/Integrated Gradients/index.md", "title": "Integrated Gradients" }],
+      "mode": "context"
+    }
+  }
+}
+```
+
+Project retrieval:
+
+```json
+{ "query": "Pi retrieval architecture", "mode": "project", "scope": { "folder": "Projects" }, "budget": "standard" }
 ```
 
 ## Safety model

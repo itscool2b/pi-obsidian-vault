@@ -1,25 +1,57 @@
 import path from "node:path";
-import type { CandidateMetadata, CandidateSeed, HeadingSummary, LinkSummary, BacklinkSummary, ObsidianCliBackend } from "./retrieval-types.js";
+import type { CandidateMetadata, CandidateSeed, DegradedSignal, HeadingSummary, LinkSummary, BacklinkSummary, ObsidianCliBackend } from "./retrieval-types.js";
 
 export interface EnrichedCandidateSeed extends CandidateSeed {
   title: string;
   metadata: CandidateMetadata;
 }
 
-export async function enrichCandidateMetadata(backend: ObsidianCliBackend, seeds: CandidateSeed[], options: { metadataItems: number; hydrateRelationships?: boolean }): Promise<EnrichedCandidateSeed[]> {
-  const aliasMap = await aliasesByPath(backend).catch(() => new Map<string, string[]>());
-  const tagMap = await tagsByPath(backend).catch(() => new Map<string, string[]>());
-  const propertyMap = await propertiesByPath(backend).catch(() => new Map<string, Record<string, unknown>>());
-  const recentSet = await recentPaths(backend).catch(() => new Set<string>());
+export async function enrichCandidateMetadata(backend: ObsidianCliBackend, seeds: CandidateSeed[], options: { metadataItems: number; hydrateRelationships?: boolean; degradedSignals?: Set<DegradedSignal> | undefined }): Promise<EnrichedCandidateSeed[]> {
+  const aliasMap = await aliasesByPath(backend).catch(() => {
+    options.degradedSignals?.add("metadata");
+    return new Map<string, string[]>();
+  });
+  const tagMap = await tagsByPath(backend).catch(() => {
+    options.degradedSignals?.add("metadata");
+    return new Map<string, string[]>();
+  });
+  const propertyMap = await propertiesByPath(backend).catch(() => {
+    options.degradedSignals?.add("properties");
+    return new Map<string, Record<string, unknown>>();
+  });
+  const recentSet = await recentPaths(backend).catch(() => {
+    options.degradedSignals?.add("recents");
+    return new Set<string>();
+  });
 
   return Promise.all(seeds.map(async (seed) => {
     const metadata: CandidateMetadata = {};
-    const aliases = aliasMap.get(seed.path)?.slice(0, options.metadataItems);
-    if (aliases && aliases.length > 0) metadata.aliases = aliases;
-    const tags = tagMap.get(seed.path)?.slice(0, options.metadataItems);
-    if (tags && tags.length > 0) metadata.tags = tags;
-    const properties = propertyMap.get(seed.path);
-    if (properties && Object.keys(properties).length > 0) metadata.properties = limitObject(properties, options.metadataItems);
+    let aliases = aliasMap.get(seed.path)?.slice(0, options.metadataItems);
+    if (!aliases || aliases.length === 0) {
+      aliases = await backend.aliases({ path: seed.path }).then((result) => result.aliases.map((alias) => alias.alias).slice(0, options.metadataItems)).catch(() => {
+        options.degradedSignals?.add("metadata");
+        return [];
+      });
+    }
+    if (aliases.length > 0) metadata.aliases = aliases;
+
+    let tags = tagMap.get(seed.path)?.slice(0, options.metadataItems);
+    if (!tags || tags.length === 0) {
+      tags = await backend.tags({ path: seed.path, counts: true }).then((result) => result.tags.map((tag) => tag.tag).slice(0, options.metadataItems)).catch(() => {
+        options.degradedSignals?.add("metadata");
+        return [];
+      });
+    }
+    if (tags.length > 0) metadata.tags = tags;
+
+    let properties = propertyMap.get(seed.path);
+    if (!properties || Object.keys(properties).length === 0) {
+      properties = await backend.properties({ path: seed.path }).then((result) => Object.fromEntries(result.properties.map((property) => [property.name, property.value ?? true]))).catch(() => {
+        options.degradedSignals?.add("properties");
+        return {};
+      });
+    }
+    if (Object.keys(properties).length > 0) metadata.properties = limitObject(properties, options.metadataItems);
     if (recentSet.has(seed.path)) metadata.recent = true;
 
     let title = seed.title ?? titleFromPath(seed.path);
@@ -58,7 +90,7 @@ export async function enrichCandidateMetadata(backend: ObsidianCliBackend, seeds
         });
         if (summaries.length > 0) metadata.links = summaries;
       } catch {
-        // optional
+        options.degradedSignals?.add("relationships");
       }
       try {
         const backlinks = await backend.backlinks({ path: seed.path });
@@ -72,7 +104,8 @@ export async function enrichCandidateMetadata(backend: ObsidianCliBackend, seeds
         });
         if (summaries.length > 0) metadata.backlinks = summaries;
       } catch {
-        // optional
+        options.degradedSignals?.add("backlinks");
+        options.degradedSignals?.add("relationships");
       }
     }
 

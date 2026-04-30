@@ -12,4 +12,12 @@ describe("graph and project ranking signals", () => {
     expect(project.candidates[0]?.availableSignals).toEqual(expect.arrayContaining(["project_folder", "tag", "property", "recency"]));
     expect(project.candidates[0]?.metadata.links?.length ?? 0).toBeGreaterThan(0);
   });
+
+  it("centers Integrated Gradients MOC ahead of a generic CS EE MOC", async () => {
+    const result = await obsidianRetrieve(seededFakeCli(), { query: "connections around Integrated Gradients MOC", mode: "graph", budget: "expanded" });
+
+    expect(result.candidates[0]?.path).toBe("MOCs/Integrated Gradients MOC.md");
+    expect(result.graph?.centerPath).toBe("MOCs/Integrated Gradients MOC.md");
+    expect(result.candidates.findIndex((candidate) => candidate.path === "MOCs/CS EE MOC.md")).toBeGreaterThan(0);
+  });
 });

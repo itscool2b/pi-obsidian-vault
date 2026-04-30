@@ -69,6 +69,48 @@ describe("ObsidianCliAdapter", () => {
     expect(await adapter.file({ file: "System Specs" })).toMatchObject({ path: "normal shit/System Specs.md", name: "System Specs", extension: "md", size: 25037 });
   });
 
+  it("auto-launches Obsidian and retries when the CLI reports the app is not running", async () => {
+    const calls: string[][] = [];
+    const launchCalls: string[][] = [];
+    const runner: CommandRunner = async (_command, args) => {
+      calls.push(args);
+      if (calls.length === 1) return { stdout: "", stderr: "The CLI is unable to find Obsidian. Please make sure Obsidian is running and try again.", exitCode: 1 };
+      return { stdout: "1.2.3", stderr: "", exitCode: 0 };
+    };
+    const launchRunner: CommandRunner = async (_command, args) => {
+      launchCalls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    const adapter = new ObsidianCliAdapter({ cwd: "/vault", runner, launchRunner, autoLaunch: true, launchWaitMs: 0 });
+
+    const health = await adapter.checkHealth({ allowAutoLaunch: true });
+
+    expect(health.available).toBe(true);
+    expect(health.version).toBe("1.2.3");
+    expect(calls).toEqual([["version"], ["version"]]);
+    expect(launchCalls[0]?.[0]).toContain("obsidian://open?path=");
+  });
+
+  it("keeps health checks side-effect-free unless auto-launch is explicitly allowed", async () => {
+    const calls: string[][] = [];
+    const launchCalls: string[][] = [];
+    const runner: CommandRunner = async (_command, args) => {
+      calls.push(args);
+      return { stdout: "", stderr: "The CLI is unable to find Obsidian. Please make sure Obsidian is running and try again.", exitCode: 1 };
+    };
+    const launchRunner: CommandRunner = async (_command, args) => {
+      launchCalls.push(args);
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    const adapter = new ObsidianCliAdapter({ cwd: "/vault", runner, launchRunner, autoLaunch: true, launchWaitMs: 0 });
+
+    const health = await adapter.checkHealth();
+
+    expect(health.available).toBe(false);
+    expect(calls).toEqual([["version"], ["help"]]);
+    expect(launchCalls).toEqual([]);
+  });
+
   it("normalizes timeouts and blocks side-effect commands", async () => {
     const timeoutRunner: CommandRunner = async () => ({ stdout: "", stderr: "", exitCode: 0, timedOut: true });
     const adapter = new ObsidianCliAdapter({ runner: timeoutRunner });

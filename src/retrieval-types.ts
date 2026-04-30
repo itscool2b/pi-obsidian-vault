@@ -2,7 +2,13 @@ export type RetrievalMode = "auto" | "search" | "context" | "graph" | "project";
 export type ResolvedRetrievalMode = "search" | "context" | "graph" | "project";
 export type BudgetProfile = "tiny" | "standard" | "expanded";
 export type RankingSignal = "title" | "path" | "alias" | "tag" | "property" | "heading" | "content" | "backlink" | "outgoing_link" | "recency" | "project_folder" | "exact_file" | "fuzzy";
-export type IncludeSignal = "metadata" | "links" | "backlinks" | "aliases" | "tags" | "properties" | "recents" | "sections" | "graph" | "suggestions";
+export type ConfidenceLevel = "high" | "medium" | "low" | "none";
+export type AgentResultState = "answer_from_discovery" | "request_context" | "ambiguous" | "no_match" | "context_returned";
+export type AnswerScope = "discovery_only" | "needs_selected_context" | "clarify_first" | "use_returned_context";
+export type ContextRecommendationMode = "none" | "context";
+export type StructuredAction = "answer" | "request_context" | "clarify" | "refine_query" | "inspect_alternative" | "stop";
+export type DegradedSignal = "metadata" | "backlinks" | "properties" | "recents" | "relationships";
+export type EvidenceQuality = "strong" | "supporting" | "weak" | "ignored";
 
 export interface SelectedCandidateRef {
   path: string;
@@ -21,7 +27,6 @@ export interface RetrievalRequest {
   mode?: RetrievalMode | undefined;
   selected?: SelectedCandidateRef[] | undefined;
   scope?: RetrievalScope | undefined;
-  include?: IncludeSignal[] | undefined;
   budget?: BudgetProfile | undefined;
   maxCandidates?: number | undefined;
   explain?: boolean | undefined;
@@ -216,8 +221,12 @@ export interface ObsidianCliHealth {
   warnings: string[];
 }
 
+export interface ObsidianCliHealthOptions {
+  allowAutoLaunch?: boolean | undefined;
+}
+
 export interface ObsidianCliBackend {
-  checkHealth(): Promise<ObsidianCliHealth>;
+  checkHealth(options?: ObsidianCliHealthOptions): Promise<ObsidianCliHealth>;
   search(input: SearchCommandInput): Promise<SearchCommandResult>;
   searchContext(input: SearchCommandInput): Promise<SearchContextCommandResult>;
   files(input: FilesCommandInput): Promise<FileListCommandResult>;
@@ -300,6 +309,22 @@ export interface MatchReason {
   score: number;
   command?: string | undefined;
   line?: number | undefined;
+  quality?: EvidenceQuality | undefined;
+  matchedTerms?: string[] | undefined;
+  isGenericOnly?: boolean | undefined;
+  isStopwordOnly?: boolean | undefined;
+}
+
+export interface SignalExplanation {
+  signal: RankingSignal;
+  evidence: string;
+  why: string;
+  line?: number | undefined;
+}
+
+export interface MatchSummary {
+  headline: string;
+  signals: SignalExplanation[];
 }
 
 export interface RankedCandidate {
@@ -312,6 +337,12 @@ export interface RankedCandidate {
   matchReasons: MatchReason[];
   metadata: CandidateMetadata;
   availableSignals: RankingSignal[];
+  evidenceQuality?: EvidenceQuality | undefined;
+  meaningfulScore?: number | undefined;
+  weakOnly?: boolean | undefined;
+  selectedRef?: SelectedCandidateRef | undefined;
+  confidenceLevel?: ConfidenceLevel | undefined;
+  matchSummary?: MatchSummary | undefined;
 }
 
 export interface ContextSection {
@@ -376,6 +407,54 @@ export interface BudgetReport {
   omissions: string[];
 }
 
+export interface BestMatchSummary {
+  selectedRef?: SelectedCandidateRef | undefined;
+  rank: number;
+  path: string;
+  title: string;
+  reason: string;
+  preview?: string | undefined;
+  topSignals: RankingSignal[];
+}
+
+export interface ConfidenceAssessment {
+  level: ConfidenceLevel;
+  score?: number | undefined;
+  ambiguous: boolean;
+  marginToNext?: number | undefined;
+  rationale: string;
+  degradedSignals?: DegradedSignal[] | undefined;
+}
+
+export interface ContextRecommendation {
+  recommended: boolean;
+  reason: string;
+  selected: SelectedCandidateRef[];
+  mode: ContextRecommendationMode;
+  query?: string | undefined;
+  answerScope: AnswerScope;
+}
+
+export interface StructuredNextAction {
+  priority: number;
+  action: StructuredAction;
+  label: string;
+  params?: {
+    mode?: "context" | undefined;
+    selected?: SelectedCandidateRef[] | undefined;
+    query?: string | undefined;
+  } | undefined;
+}
+
+export interface AgentGuidance {
+  resultState: AgentResultState;
+  bestMatch: BestMatchSummary | null;
+  confidence: ConfidenceAssessment;
+  contextRecommendation: ContextRecommendation;
+  alternatives: SelectedCandidateRef[];
+  nextActions: StructuredNextAction[];
+}
+
 export interface ObsidianRetrieveOutput {
   mode: ResolvedRetrievalMode;
   query?: string | undefined;
@@ -385,6 +464,7 @@ export interface ObsidianRetrieveOutput {
   budget: BudgetReport;
   warnings: string[];
   nextActions: string[];
+  agentGuidance: AgentGuidance;
 }
 
 export interface BudgetConfig {
