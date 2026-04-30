@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { OBSIDIAN_RETRIEVE_BUDGETS, registerObsidianVault } from "../src/index.js";
@@ -14,10 +16,10 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers obsidian_retrieve, obsidian_write, and the existing status command", () => {
+  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
     expect([...pi.commands.keys()]).toEqual(["obsidian-vault"]);
   });
 
@@ -57,6 +59,73 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/explicit/i);
     expect(surfaceText).toMatch(/append/i);
     expect(surfaceText).toMatch(/overwrite/i);
+  });
+
+  it("publishes a strict obsidian_edit schema without destination inference or command fields", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const schema = pi.tools.get("obsidian_edit").parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "heading", "newText", "oldText", "operation", "path", "property", "value"]);
+    expect(Value.Check(schema, { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New" })).toBe(true);
+    expect(Value.Check(schema, { operation: "update_frontmatter", path: "Notes/Existing.md", property: "status", value: "reviewed", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "replace_exact_text", path: "Notes/Existing.md", oldText: "Old", newText: "New", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New", command: "rm" })).toBe(false);
+    const surfaceText = [pi.tools.get("obsidian_edit").description, pi.tools.get("obsidian_edit").promptSnippet, ...(pi.tools.get("obsidian_edit").promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/replace_section/);
+    expect(surfaceText).toMatch(/replace_exact_text/);
+    expect(surfaceText).toMatch(/oldText/);
+    expect(surfaceText).toMatch(/newText/);
+    expect(surfaceText).toMatch(/dryRun/i);
+    expect(surfaceText).toMatch(/existing/i);
+    expect(surfaceText).toMatch(/create, full-note overwrite, delete, rename, move/i);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+  });
+
+  it("reports obsidian_edit status without leaking vaultRoot or absolute paths", async () => {
+    const pi = fakePi();
+    const messages: string[] = [];
+    const tempRoot = "/tmp/pi-obsidian-status-vault";
+    registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: tempRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: "/tmp/pi-obsidian-status-missing.json" });
+    await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string) { messages.push(message); } } });
+    const message = messages.join("\n");
+    expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
+    expect(message).not.toContain(tempRoot);
+    expect(message).not.toMatch(/\/tmp\/pi-obsidian-status-vault/);
+  });
+
+  it("redacts absolute vault, target, and CLI paths from status output", async () => {
+    const vaultRoot = mkdtempSync(path.join(os.tmpdir(), "pi-obsidian-status-vault-"));
+    try {
+      const pi = fakePi();
+      const messages: string[] = [];
+      const absoluteCliPath = path.join(os.tmpdir(), "pi-obsidian-status-cli", "obsidian-cli");
+      const absoluteTargetPath = path.join(vaultRoot, "Notes", "Target.md");
+      const backend = {
+        async checkHealth() {
+          return {
+            available: false,
+            cliPath: absoluteCliPath,
+            errors: [`CLI failed for target ${absoluteTargetPath}`],
+            warnings: [`Configured CLI path ${absoluteCliPath} could not be executed`],
+          };
+        },
+      };
+
+      registerObsidianVault(pi as any, { backend: backend as any, env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: absoluteCliPath }, configPath: path.join(vaultRoot, "missing-config.json") });
+      await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string) { messages.push(message); } } });
+      const message = messages.join("\n");
+
+      expect(message).toContain("CLI: configured absolute path redacted");
+      expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
+      expect(message).not.toContain(vaultRoot);
+      expect(message).not.toContain(absoluteTargetPath);
+      expect(message).not.toContain(absoluteCliPath);
+      expect(message).not.toMatch(/CLI:\s*\//);
+    } finally {
+      rmSync(vaultRoot, { recursive: true, force: true });
+    }
   });
 
   it("rejects unsupported fields and unsupported budget constants at the schema level", () => {

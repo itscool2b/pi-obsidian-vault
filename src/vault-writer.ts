@@ -3,6 +3,7 @@ import { access, appendFile, mkdir, open, realpath, stat } from "node:fs/promise
 import path from "node:path";
 import { PathSafetyError } from "./errors.js";
 import { normalizeVaultRelativePath } from "./path-safety.js";
+import { withTargetLock } from "./target-lock.js";
 import type { ObsidianWriteOperation, WriteContentSummary, WriteTargetSummary } from "./write-types.js";
 
 export interface VaultWritePreviewInput {
@@ -41,7 +42,6 @@ export interface VaultWriter {
 }
 
 export class LocalVaultWriter implements VaultWriter {
-  private static readonly queues = new Map<string, Promise<void>>();
   private readonly root: string;
   private rootRealpath: Promise<string> | undefined;
 
@@ -156,19 +156,7 @@ export class LocalVaultWriter implements VaultWriter {
   }
 
   private async withTargetQueue<T>(safePath: string, run: () => Promise<T>): Promise<T> {
-    const key = `${await this.vaultRootRealpath()}::${safePath}`;
-    const previous = LocalVaultWriter.queues.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => { release = resolve; });
-    const next = previous.then(() => current, () => current);
-    LocalVaultWriter.queues.set(key, next);
-    await previous.catch(() => undefined);
-    try {
-      return await run();
-    } finally {
-      release();
-      if (LocalVaultWriter.queues.get(key) === next) LocalVaultWriter.queues.delete(key);
-    }
+    return withTargetLock(`${await this.vaultRootRealpath()}::${safePath}`, run);
   }
 }
 

@@ -1,19 +1,24 @@
 import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import path from "node:path";
 import { Type } from "typebox";
-import { loadConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
+import { editStatusFromConfig, loadConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
+import { obsidianEdit } from "./edit-engine.js";
 import { obsidianWrite } from "./write-engine.js";
 import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
+import type { ObsidianEditRequest } from "./edit-types.js";
 import type { ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
 export { loadConfig } from "./config.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
+export { obsidianEdit } from "./edit-engine.js";
 export { obsidianWrite } from "./write-engine.js";
+export * from "./edit-types.js";
 export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
@@ -63,6 +68,21 @@ const ObsidianWriteParams = Type.Object({
 }, {
   additionalProperties: false,
   description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create and append. dryRun defaults to true. Paths must be explicit safe vault-relative Markdown paths; no overwrite, delete, rename, move, open UI, shell, network, scan, or arbitrary CLI behavior is supported.",
+});
+
+const ObsidianEditParams = Type.Object({
+  operation: Type.Optional(Type.String({ description: "Edit operation. Supported semantic values are replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, and replace_exact_text; forbidden operations return safety_refusal." })),
+  path: Type.Optional(Type.String({ description: "Explicit vault-relative Markdown path to an existing note. obsidian_edit never creates notes or infers destinations." })),
+  heading: Type.Optional(Type.String({ description: "Exact ATX Markdown heading for section operations, for example ## Plan. Heading level and text must match after normalization." })),
+  content: Type.Optional(Type.String({ description: "Markdown content for replace_section or insert_under_heading. Missing content is invalid; empty content is valid only for replace_section." })),
+  property: Type.Optional(Type.String({ description: "Top-level YAML frontmatter property name for update_frontmatter or remove_frontmatter." })),
+  value: Type.Optional(Type.Unknown({ description: "JSON-compatible value for update_frontmatter." })),
+  oldText: Type.Optional(Type.String({ description: "Non-empty exact text span to replace for replace_exact_text. Matched literally; no regex, fuzzy, semantic, or inferred matching." })),
+  newText: Type.Optional(Type.String({ description: "Explicit replacement text for replace_exact_text. May be an empty string when intentionally supplied." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes. Set false only after explicit confirmation." })),
+}, {
+  additionalProperties: false,
+  description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
 });
 
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
@@ -119,25 +139,52 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     },
   });
 
+  pi.registerTool({
+    name: "obsidian_edit",
+    label: "Obsidian Edit",
+    description: "Safely edit existing Markdown notes in Obsidian using explicit structured operations. Separate from obsidian_retrieve and obsidian_write. Supports replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, and replace_exact_text. dryRun defaults to true. Requires an explicit safe vault-relative Markdown path to an existing note. Never creates notes, overwrites full notes, deletes, renames, moves, opens the UI, runs shell/network calls, scans the vault, or executes arbitrary CLI commands.",
+    promptSnippet: "Use obsidian_edit only for explicit safe structured edits to existing Markdown notes. Prefer dryRun=true previews before committing with dryRun=false.",
+    promptGuidelines: [
+      "Use obsidian_edit only when the user wants to edit an existing Markdown note at an explicit safe vault-relative .md path.",
+      "Use obsidian_edit with dryRun=true or omitted to preview structured edits; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "obsidian_edit requires operation, path, and operation-specific fields: heading/content for replace_section or insert_under_heading; property/value for update_frontmatter; property for remove_frontmatter; oldText/newText for replace_exact_text.",
+      "For replace_exact_text, oldText must match exactly once with no regex, fuzzy, semantic, normalized, or inferred matching; duplicate or missing oldText fails without mutation.",
+      "Section headings must be exact ATX Markdown headings such as ## Plan; duplicate matching headings return ambiguity and must not be resolved automatically.",
+      "Frontmatter edits affect only top-of-file YAML frontmatter; update_frontmatter may create frontmatter, remove_frontmatter requires an existing property.",
+      "obsidian_edit refuses create, full-note overwrite, delete, rename, move, open UI, shell, network, regex, fuzzy, scan, and arbitrary CLI requests with safety_refusal.",
+      "Use obsidian_write only for create/append; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and write create/append-only.",
+    ],
+    parameters: ObsidianEditParams,
+    async execute(_toolCallId: string, params: ObsidianEditRequest) {
+      const config = await loadConfig(options);
+      const result = await obsidianEdit(params, { vaultRoot: config.vaultRoot });
+      return toolResponse(result);
+    },
+  });
+
   pi.registerCommand("obsidian-vault", {
-    description: "Show configured Obsidian CLI retrieval and write status",
+    description: "Show configured Obsidian CLI retrieval, write, and structured edit status",
     handler: async (_args: string, ctx: { ui: { notify(message: string, level?: string): void } }) => {
       const backend = await backendFromOptions(options);
-      const config = options.backend ? undefined : await loadConfig(options);
+      const config = await loadConfig(options);
       const status = config ? statusFromConfig(config) : undefined;
       const writeStatus = config ? await writeStatusFromConfig(config) : undefined;
+      const editStatus = config ? await editStatusFromConfig(config) : undefined;
       const health = await backend.checkHealth({ allowAutoLaunch: false });
       const lines = [
         `Obsidian Vault: ${health.available ? "CLI available" : "CLI unavailable"}`,
         status ? `Source: ${status.source}` : "Source: injected backend",
-        `CLI: ${health.cliPath}`,
+        `CLI: ${safeStatusCliPath(health.cliPath)}`,
       ];
-      if (status?.vaultRoot) lines.push(`Vault path: ${status.vaultRoot}`);
+      if (status?.vaultRoot) lines.push("Vault path: configured");
+      else lines.push("Vault path: not configured locally");
       if (status?.vaultTarget || health.vaultTarget) lines.push(`Vault target: ${status?.vaultTarget ?? health.vaultTarget}`);
       if (writeStatus) lines.push(`Writes: ${writeStatus.writable ? "available" : "unavailable"}`);
-      for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? [])]) lines.push(`Error: ${error}`);
-      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? [])]) lines.push(`Warning: ${warning}`);
-      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) ? "info" : "warning");
+      if (editStatus) lines.push(`obsidian_edit: ${editStatus.status}`);
+      const extraSensitivePaths = [health.cliPath];
+      for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
+      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? [])]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
+      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) && (editStatus?.status !== "degraded") ? "info" : "warning");
     },
   });
 }
@@ -146,6 +193,34 @@ async function backendFromOptions(options: RegisterObsidianVaultOptions): Promis
   if (options.backend) return options.backend;
   const config = await loadConfig(options);
   return new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: config.autoLaunch, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
+}
+
+function safeStatusCliPath(cliPath: string): string {
+  const clean = cliPath.trim();
+  if (isAbsoluteFilesystemPath(clean)) return "configured absolute path redacted";
+  return clean || "unknown";
+}
+
+function redactStatusPath(message: string, config: VaultConfig | undefined, extraSensitiveValues: string[] = []): string {
+  let result = message;
+  const exactRedactions = [
+    { value: config?.rawVaultPath, replacement: "[vault path]" },
+    { value: config?.vaultRoot, replacement: "[vault path]" },
+    { value: isAbsoluteFilesystemPath(config?.cliPath ?? "") ? config?.cliPath : undefined, replacement: "[path]" },
+    ...extraSensitiveValues.filter(isAbsoluteFilesystemPath).map((value) => ({ value, replacement: "[path]" })),
+  ]
+    .filter((item): item is { value: string; replacement: string } => Boolean(item.value))
+    .sort((a, b) => b.value.length - a.value.length);
+  for (const { value, replacement } of exactRedactions) {
+    result = result.split(value).join(replacement);
+  }
+  return result
+    .replace(/[A-Za-z]:\\[^\r\n)]+/g, "[path]")
+    .replace(/\/(?:[^\r\n:)]+\/)+[^\r\n:)]+/g, "[path]");
+}
+
+function isAbsoluteFilesystemPath(value: string): boolean {
+  return path.isAbsolute(value) || path.win32.isAbsolute(value);
 }
 
 function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | undefined, errors: string[], extraWarnings: string[] = []): ObsidianRetrieveOutput {

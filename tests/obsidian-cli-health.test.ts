@@ -27,7 +27,8 @@ describe("Obsidian CLI health and degraded signals", () => {
       await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string, level?: string) { messages.push({ message, level }); } } });
       expect(messages).toHaveLength(1);
       expect(messages[0]?.message).toContain("Writes: available");
-      expect(messages[0]?.message).toContain("CLI: /bin/true");
+      expect(messages[0]?.message).toContain("CLI: configured absolute path redacted");
+      expect(messages[0]?.message).not.toContain("/bin/true");
       expect(messages[0]?.level).toBe("info");
     });
   });

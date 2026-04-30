@@ -23,6 +23,11 @@ export async function readNote(vaultRoot: string, relativePath: string): Promise
   return readFile(path.join(vaultRoot, ...relativePath.split("/")), "utf8");
 }
 
+export async function expectNoteUnchanged(vaultRoot: string, relativePath: string, expectedContent: string): Promise<void> {
+  const actual = await readNote(vaultRoot, relativePath);
+  if (actual !== expectedContent) throw new Error(`Expected ${relativePath} to remain unchanged.`);
+}
+
 export function absoluteNotePath(vaultRoot: string, relativePath: string): string {
   return path.join(vaultRoot, ...relativePath.split("/"));
 }
@@ -40,6 +45,18 @@ export function registerWriteTool(vaultRoot: string) {
   const pi = fakePi();
   registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
   return pi.tools.get("obsidian_write");
+}
+
+export function registerEditTool(vaultRoot: string) {
+  const pi = fakePi();
+  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  return pi.tools.get("obsidian_edit");
+}
+
+export function expectNoLocalPathLeak(value: unknown, vaultRoot: string): void {
+  const text = stringifyDetails(value);
+  if (text.includes(vaultRoot)) throw new Error(`Response leaked vault root: ${text}`);
+  if (/\/tmp\/pi-obsidian-(write|outside)-/.test(text)) throw new Error(`Response leaked temp path: ${text}`);
 }
 
 export function stringifyDetails(value: unknown): string {

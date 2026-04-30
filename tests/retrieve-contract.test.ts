@@ -13,12 +13,12 @@ function fakePi() {
 }
 
 describe("obsidian_retrieve contract", () => {
-  it("registers only obsidian_retrieve plus status command and supports backend injection", async () => {
+  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, plus status command and supports backend injection", async () => {
     const pi = fakePi();
     const backend = seededFakeCli();
     registerObsidianVault(pi as any, { backend });
 
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
     expect(pi.commands.has("obsidian-vault")).toBe(true);
     const result = await pi.tools.get("obsidian_retrieve").execute("id", { query: "IG", mode: "search" });
     expect(result.details.candidates[0].path).toBe("Research/Integrated Gradients/index.md");
@@ -45,9 +45,11 @@ describe("obsidian_retrieve contract", () => {
     expect(result.budget.usedChars).toBeLessThanOrEqual(result.budget.maxChars);
   });
 
-  it("warns on write/open intent instead of exposing side-effect tools", async () => {
+  it("warns on write/open/replace intent instead of exposing side-effect tools", async () => {
     const result = await obsidianRetrieve(seededFakeCli(), { query: "open and append integrated gradients", mode: "search" });
     expect(result.warnings.join("\n")).toMatch(/read-only/i);
+    const replace = await obsidianRetrieve(seededFakeCli(), { query: "replace exact text in integrated gradients", mode: "search" });
+    expect(replace.warnings.join("\n")).toMatch(/read-only/i);
   });
 
   it("returns setup guidance from obsidian_retrieve itself when no vault is configured", async () => {
