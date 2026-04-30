@@ -1,0 +1,43 @@
+{
+  "name": "pi-obsidian-vault",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi-focused Obsidian retrieval harness powered by the official Obsidian CLI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/itscool2b/pi-obsidian-vault.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "obsidian",
+    "vault",
+    "markdown"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm test"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@mariozechner/pi-ai": "*",
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-ai": "^0.70.6",
+    "@mariozechner/pi-coding-agent": "^0.70.6",
+    "@types/node": "^24.0.0",
+    "typebox": "^1.1.24",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  }
+}
