@@ -52,23 +52,66 @@ describe("shared mutation lock regression", () => {
     });
   });
 
-  it("does not force independent write, edit, move, and trash targets through a global queue", async () => {
+  it("serializes restore destination collisions with write, move, and trash operations", async () => {
+    await withTempVault(async (vaultRoot) => {
+      await seedNote(vaultRoot, "_Trash/Restore.md", "restore");
+      await seedNote(vaultRoot, "Move/Restore.md", "move");
+      await seedNote(vaultRoot, "Trash/Restore.md", "trash");
+      await seedFolder(vaultRoot, "Archive");
+      const writeRace = await Promise.all([
+        obsidianManage({ operation: "restore_note", trashPath: "_Trash/Restore.md", toPath: "Archive/Restore.md", dryRun: false }, { vaultRoot }),
+        obsidianWrite({ operation: "create", path: "@Archive/Restore.md", content: "write", dryRun: false }, { vaultRoot }),
+      ]);
+      expect(writeRace.filter((result) => result.status === "success")).toHaveLength(1);
+      expect(writeRace.filter((result) => result.status === "conflict")).toHaveLength(1);
+
+      const moveTrashRace = await Promise.all([
+        obsidianManage({ operation: "move_note", fromPath: "Move/Restore.md", toPath: "Archive/Move.md", dryRun: false }, { vaultRoot }),
+        obsidianManage({ operation: "trash_note", path: "Trash/Restore.md", trashFolder: "Archive", dryRun: false }, { vaultRoot }),
+      ]);
+      expect(moveTrashRace.filter((result) => result.status === "success")).toHaveLength(1);
+      expect(moveTrashRace.filter((result) => result.status === "conflict")).toHaveLength(1);
+      expect(stringifyDetails([...writeRace, ...moveTrashRace])).not.toContain(`${vaultRoot}::`);
+    });
+  });
+
+  it("serializes restore source edits", async () => {
+    await withTempVault(async (vaultRoot) => {
+      await seedNote(vaultRoot, "_Trash/Edit.md", "# Edit\n\nold\n");
+      await seedFolder(vaultRoot, "Archive");
+      const results = await Promise.all([
+        obsidianManage({ operation: "restore_note", trashPath: "_Trash/Edit.md", toPath: "Archive/Edit.md", dryRun: false }, { vaultRoot }),
+        obsidianEdit({ operation: "replace_exact_text", path: "@_Trash/Edit.md", oldText: "old", newText: "new", dryRun: false }, { vaultRoot }),
+      ]);
+      expect(results.some((result) => result.status === "success")).toBe(true);
+      expect(results.every((result) => result.committed || result.status === "not_found")).toBe(true);
+      expect(await pathExists(vaultRoot, "_Trash/Edit.md")).toBe(false);
+      expect(await pathExists(vaultRoot, "Archive/Edit.md")).toBe(true);
+      expect(["# Edit\n\nold\n", "# Edit\n\nnew\n"]).toContain(await readNote(vaultRoot, "Archive/Edit.md"));
+    });
+  });
+
+  it("does not force independent write, edit, move, trash, and restore targets through a global queue", async () => {
     await withTempVault(async (vaultRoot) => {
       await seedNote(vaultRoot, "Edit/Note.md", "# Edit\n\nold\n");
       await seedNote(vaultRoot, "Move/Note.md", "move");
       await seedNote(vaultRoot, "Trash/Note.md", "trash");
+      await seedNote(vaultRoot, "_Trash/Restore.md", "restore");
       await seedFolder(vaultRoot, "Archive");
+      await seedFolder(vaultRoot, "Restore");
       const results = await Promise.all([
         obsidianWrite({ operation: "create", path: "Write/New.md", content: "write", dryRun: false }, { vaultRoot }),
         obsidianEdit({ operation: "replace_exact_text", path: "Edit/Note.md", oldText: "old", newText: "new", dryRun: false }, { vaultRoot }),
         obsidianManage({ operation: "move_note", fromPath: "Move/Note.md", toPath: "Archive/Note.md", dryRun: false }, { vaultRoot }),
         obsidianManage({ operation: "trash_note", path: "Trash/Note.md", trashFolder: "TrashBin", dryRun: false }, { vaultRoot }),
+        obsidianManage({ operation: "restore_note", trashPath: "_Trash/Restore.md", toPath: "Restore/Restore.md", dryRun: false }, { vaultRoot }),
       ]);
       expect(results.every((result) => result.status === "success" && result.committed)).toBe(true);
       expect(await readNote(vaultRoot, "Write/New.md")).toBe("write");
       expect(await readNote(vaultRoot, "Edit/Note.md")).toContain("new");
       expect(await readNote(vaultRoot, "Archive/Note.md")).toBe("move");
       expect(await readNote(vaultRoot, "TrashBin/Note.md")).toBe("trash");
+      expect(await readNote(vaultRoot, "Restore/Restore.md")).toBe("restore");
     });
   });
 });

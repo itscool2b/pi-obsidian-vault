@@ -2,9 +2,9 @@ import { constants as fsConstants } from "node:fs";
 import { access, lstat, mkdir, realpath, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { PathSafetyError } from "./errors.js";
-import { normalizeTrashFolderTarget, normalizeTrashSourcePath, normalizeVaultRelativePath } from "./path-safety.js";
+import { normalizeRestoreDestinationPath, normalizeRestoreSourcePath, normalizeTrashFolderTarget, normalizeTrashSourcePath, normalizeVaultRelativePath } from "./path-safety.js";
 import { withTargetLocks } from "./target-lock.js";
-import type { ManageTargetSummary, TrashTargetSummary } from "./manage-types.js";
+import type { ManageTargetSummary, RestoreTargetSummary, TrashTargetSummary } from "./manage-types.js";
 
 export interface VaultMoveInput {
   fromPath: string;
@@ -13,6 +13,13 @@ export interface VaultMoveInput {
 
 export interface VaultTrashInput {
   path: string;
+  trashFolder: string;
+  trashFolderDefaulted?: boolean | undefined;
+}
+
+export interface VaultRestoreInput {
+  trashPath: string;
+  toPath: string;
   trashFolder: string;
   trashFolderDefaulted?: boolean | undefined;
 }
@@ -45,14 +52,25 @@ export class VaultManagerTrashError extends Error {
   }
 }
 
+export class VaultManagerRestoreError extends Error {
+  constructor(message: string, public readonly code: "SAME_PATH" | "TRASH_SOURCE_NOT_FOUND" | "TRASH_SOURCE_NOT_MARKDOWN" | "TRASH_SOURCE_IS_FOLDER" | "TRASH_SOURCE_NOT_FILE" | "TARGET_NOT_MARKDOWN" | "TRASH_PATH_OUTSIDE_TRASH" | "TARGET_EXISTS" | "PARENT_MISSING" | "PARENT_NOT_FOLDER" | "TRASH_FOLDER_NOT_FOLDER" | "RESTORE_FAILED") {
+    super(message);
+    this.name = "VaultManagerRestoreError";
+  }
+}
+
 export interface VaultManager {
   normalizePath(input: string): string;
   normalizeTrashSourcePath(input: string): string;
+  normalizeRestoreTrashPath(input: string): string;
+  normalizeRestoreDestinationPath(input: string): string;
   normalizeTrashFolderPath(input: string): string;
   preview(input: VaultMoveInput): Promise<ManageTargetSummary>;
   commit(input: VaultMoveInput): Promise<ManageTargetSummary>;
   previewTrash(input: VaultTrashInput): Promise<TrashTargetSummary>;
   commitTrash(input: VaultTrashInput): Promise<TrashTargetSummary>;
+  previewRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary>;
+  commitRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary>;
 }
 
 export class LocalVaultManager implements VaultManager {
@@ -70,6 +88,14 @@ export class LocalVaultManager implements VaultManager {
 
   normalizeTrashSourcePath(input: string): string {
     return normalizeTrashSourcePath(input);
+  }
+
+  normalizeRestoreTrashPath(input: string): string {
+    return normalizeRestoreSourcePath(input);
+  }
+
+  normalizeRestoreDestinationPath(input: string): string {
+    return normalizeRestoreDestinationPath(input);
   }
 
   normalizeTrashFolderPath(input: string): string {
@@ -140,6 +166,34 @@ export class LocalVaultManager implements VaultManager {
       });
       const after = await stat(absoluteTrashPath);
       return { ...target, sourceExistsAfter: false, trashFolderExistsAfter: true, trashFolderCreated: !target.trashFolderExistsBefore, trashTargetExistsAfter: true, bytesAfter: after.size };
+    });
+  }
+
+  async previewRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary> {
+    const safeTrashPath = this.normalizeRestoreTrashPath(input.trashPath);
+    const safeToPath = this.normalizeRestoreDestinationPath(input.toPath);
+    const safeTrashFolder = this.normalizeTrashFolderPath(input.trashFolder);
+    return this.inspectRestore(safeTrashPath, safeToPath, safeTrashFolder, input.trashFolderDefaulted ?? false, false);
+  }
+
+  async commitRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary> {
+    const safeTrashPath = this.normalizeRestoreTrashPath(input.trashPath);
+    const safeToPath = this.normalizeRestoreDestinationPath(input.toPath);
+    const safeTrashFolder = this.normalizeTrashFolderPath(input.trashFolder);
+    const root = await this.vaultRootRealpath();
+    return withTargetLocks([`${root}::${safeTrashPath}`, `${root}::${safeToPath}`], async () => {
+      const target = await this.inspectRestore(safeTrashPath, safeToPath, safeTrashFolder, input.trashFolderDefaulted ?? false, true);
+      const absoluteTrashPath = await this.absoluteTargetPath(safeTrashPath);
+      const absoluteTo = await this.absoluteTargetPath(safeToPath);
+      await rename(absoluteTrashPath, absoluteTo).catch((error: unknown) => {
+        if (isNodeError(error, "ENOENT")) throw new VaultManagerRestoreError("Trash source note or destination parent is missing.", "TRASH_SOURCE_NOT_FOUND");
+        if (isNodeError(error, "EEXIST")) throw new VaultManagerRestoreError("Destination note already exists; restore_note will not overwrite it.", "TARGET_EXISTS");
+        if (isNodeError(error, "ENOTDIR")) throw new VaultManagerRestoreError("Destination parent exists but is not a folder, or trashFolder is blocked by a non-folder entry.", "PARENT_NOT_FOLDER");
+        if (isNodeError(error, "EISDIR")) throw new VaultManagerRestoreError("Destination path already exists; restore_note will not overwrite it.", "TARGET_EXISTS");
+        throw error;
+      });
+      const after = await stat(absoluteTo);
+      return { ...target, trashSourceExistsAfter: false, destinationExistsAfter: true, bytesAfter: after.size };
     });
   }
 
@@ -226,6 +280,58 @@ export class LocalVaultManager implements VaultManager {
     };
   }
 
+  private async inspectRestore(trashPath: string, toPath: string, trashFolder: string, trashFolderDefaulted: boolean, forCommit: boolean): Promise<RestoreTargetSummary> {
+    if (trashPath === toPath) throw new VaultManagerRestoreError("Restore source and destination must be different vault-relative Markdown paths.", "SAME_PATH");
+    if (!isPathInsideFolder(trashPath, trashFolder)) throw new VaultManagerRestoreError("trashPath must be inside the selected trashFolder.", "TRASH_PATH_OUTSIDE_TRASH");
+
+    const absoluteTrashFolder = await this.absoluteTargetPath(trashFolder);
+    const absoluteTrashPath = await this.absoluteTargetPath(trashPath);
+    const absoluteTo = await this.absoluteTargetPath(toPath);
+    const parentPath = path.dirname(absoluteTo);
+
+    const trashFolderInfo = await stat(absoluteTrashFolder).catch(() => undefined);
+    if (trashFolderInfo) {
+      await this.assertRealPathContained(absoluteTrashFolder, "Trash folder resolves outside the configured vault.");
+      if (!trashFolderInfo.isDirectory()) throw new VaultManagerRestoreError("Selected trashFolder exists but is not a folder.", "TRASH_FOLDER_NOT_FOLDER");
+    } else {
+      await this.assertNearestExistingAncestorContained(absoluteTrashFolder);
+    }
+
+    const sourceInfo = await lstat(absoluteTrashPath).catch(() => undefined);
+    if (!sourceInfo) throw new VaultManagerRestoreError("Trash source note does not exist; restore_note will not infer another note.", "TRASH_SOURCE_NOT_FOUND");
+    await this.assertRealPathContained(absoluteTrashPath, "Trash source note resolves outside the configured vault.");
+    if (sourceInfo.isDirectory()) throw new VaultManagerRestoreError("Trash source path is a folder; restore_note restores exactly one Markdown note only.", "TRASH_SOURCE_IS_FOLDER");
+    if (!sourceInfo.isFile()) throw new VaultManagerRestoreError("Trash source path is not a regular Markdown note file.", "TRASH_SOURCE_NOT_FILE");
+
+    const destinationEntry = await lstat(absoluteTo).catch(() => undefined);
+    if (destinationEntry) throw new VaultManagerRestoreError("Destination path already exists; restore_note will not overwrite it.", "TARGET_EXISTS");
+
+    const parentInfo = await stat(parentPath).catch(() => undefined);
+    if (!parentInfo) throw new VaultManagerRestoreError("Destination parent folder does not exist; restore_note will not create it.", "PARENT_MISSING");
+    await this.assertRealPathContained(parentPath, "Destination parent folder resolves outside the configured vault.");
+    if (!parentInfo.isDirectory()) throw new VaultManagerRestoreError("Destination parent exists but is not a folder.", "PARENT_NOT_FOLDER");
+
+    return {
+      trashPath,
+      toPath,
+      trashFolder,
+      targetKind: "markdown",
+      trashFolderDefaulted,
+      trashSourceExistsBefore: true,
+      trashSourceExistsAfter: !forCommit,
+      destinationExistsBefore: false,
+      destinationExistsAfter: forCommit,
+      parentExistsBefore: true,
+      parentIsFolderBefore: true,
+      wouldOverwrite: false,
+      wouldCreateParent: false,
+      wouldPermanentlyDelete: false,
+      wouldRewriteLinks: false,
+      bytesBefore: sourceInfo.size,
+      bytesAfter: forCommit ? sourceInfo.size : undefined,
+    };
+  }
+
   private async absoluteTargetPath(safePath: string): Promise<string> {
     const root = await this.vaultRootRealpath();
     const absolutePath = path.resolve(root, ...safePath.split("/"));
@@ -276,6 +382,11 @@ function trashPathFor(safePath: string, trashFolder: string): string {
   return path.posix.join(trashFolder, path.posix.basename(safePath));
 }
 
+function isPathInsideFolder(safePath: string, safeFolder: string): boolean {
+  const relative = path.posix.relative(safeFolder, safePath);
+  return relative !== "" && !relative.startsWith("../") && relative !== ".." && !path.posix.isAbsolute(relative);
+}
+
 function assertContained(root: string, candidate: string, message: string): void {
   const relative = path.relative(root, candidate);
   if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) return;
@@ -298,6 +409,13 @@ export function manageErrorFromUnknown(error: unknown): { code: string; message:
     if (error.code === "TRASH_TARGET_EXISTS" || error.code === "TRASH_FOLDER_NOT_FOLDER") return { code: error.code, message: error.message, category: "conflict" };
     if (error.code === "SOURCE_IS_FOLDER" || error.code === "SOURCE_NOT_FILE") return { code: error.code, message: error.message, category: "safety" };
     return { code: "TRASH_FAILED", message: error.message, category: "runtime" };
+  }
+  if (error instanceof VaultManagerRestoreError) {
+    if (error.code === "SAME_PATH" || error.code === "TRASH_SOURCE_NOT_MARKDOWN" || error.code === "TARGET_NOT_MARKDOWN") return { code: error.code, message: error.message, category: "validation" };
+    if (error.code === "TRASH_SOURCE_NOT_FOUND" || error.code === "PARENT_MISSING") return { code: error.code, message: error.message, category: "not_found" };
+    if (error.code === "TARGET_EXISTS" || error.code === "PARENT_NOT_FOLDER" || error.code === "TRASH_FOLDER_NOT_FOLDER") return { code: error.code, message: error.message, category: "conflict" };
+    if (error.code === "TRASH_PATH_OUTSIDE_TRASH" || error.code === "TRASH_SOURCE_IS_FOLDER" || error.code === "TRASH_SOURCE_NOT_FILE") return { code: error.code, message: error.message, category: "safety" };
+    return { code: "RESTORE_FAILED", message: error.message, category: "runtime" };
   }
   if (error instanceof VaultManagerSetupError) return { code: error.code, message: error.message, category: "setup" };
   return { code: "MOVE_FAILED", message: "The note management operation could not be completed safely.", category: "runtime" };

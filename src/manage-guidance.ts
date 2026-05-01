@@ -1,4 +1,4 @@
-import type { ManagePreview, ManageTargetSummary, ObsidianManageError, ObsidianManageNextAction, ObsidianManageOperation, ObsidianManageOutput, ObsidianManageStatus, TrashPreview, TrashTargetSummary } from "./manage-types.js";
+import type { ManagePreview, ManageTargetSummary, ObsidianManageError, ObsidianManageNextAction, ObsidianManageOperation, ObsidianManageOutput, ObsidianManageStatus, RestorePreview, RestoreTargetSummary, TrashPreview, TrashTargetSummary } from "./manage-types.js";
 
 const FORBIDDEN_OPERATIONS = new Set([
   "overwrite",
@@ -23,6 +23,9 @@ const FORBIDDEN_OPERATIONS = new Set([
   "copy",
   "duplicate",
   "restore",
+  "untrash",
+  "recover",
+  "undo",
   "rename",
   "move",
   "move_folder",
@@ -33,6 +36,9 @@ const FORBIDDEN_OPERATIONS = new Set([
   "recursive_delete",
   "bulk_delete",
   "wildcard_delete",
+  "recursive_restore",
+  "bulk_restore",
+  "wildcard_restore",
   "create_folder",
   "mkdir",
   "create_directory",
@@ -55,7 +61,7 @@ const FORBIDDEN_OPERATIONS = new Set([
 export function normalizeManageOperation(value: string | undefined): { operation?: ObsidianManageOperation | undefined; requested?: string | undefined; forbidden: boolean } {
   const requested = value?.trim().toLowerCase();
   if (!requested) return { forbidden: false };
-  if (requested === "move_note" || requested === "trash_note") return { operation: requested, requested, forbidden: false };
+  if (requested === "move_note" || requested === "trash_note" || requested === "restore_note") return { operation: requested, requested, forbidden: false };
   const forbidden = FORBIDDEN_OPERATIONS.has(requested) || /overwrite|replace|truncate|prepend|delete|remove|unlink|erase|discard|trash|recycle|copy|duplicate|restore|rename|\bmove\b|folder|recursive|bulk|wildcard|open|launch|shell|bash|exec|command|curl|fetch|network|scan|discover|rewrite|link/.test(requested);
   return { requested, forbidden };
 }
@@ -93,6 +99,21 @@ export function buildTrashPreview(target: TrashTargetSummary): TrashPreview {
   };
 }
 
+export function buildRestorePreview(target: RestoreTargetSummary): RestorePreview {
+  return {
+    operation: "restore_note",
+    trashPath: target.trashPath,
+    toPath: target.toPath,
+    trashFolder: target.trashFolder,
+    targetKind: "markdown",
+    wouldRestore: true,
+    wouldOverwrite: false,
+    wouldCreateParent: false,
+    wouldPermanentlyDelete: false,
+    wouldRewriteLinks: false,
+  };
+}
+
 export function makeManageOutput(input: {
   status: ObsidianManageStatus;
   operation?: string | undefined;
@@ -104,8 +125,8 @@ export function makeManageOutput(input: {
   dryRun: boolean;
   committed?: boolean | undefined;
   message: string;
-  target?: ManageTargetSummary | TrashTargetSummary | undefined;
-  preview?: ManagePreview | TrashPreview | undefined;
+  target?: ManageTargetSummary | TrashTargetSummary | RestoreTargetSummary | undefined;
+  preview?: ManagePreview | TrashPreview | RestorePreview | undefined;
   error?: ObsidianManageError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianManageNextAction[] | undefined;
@@ -150,7 +171,7 @@ export function nextActionsFor(input: {
   trashPath?: string | undefined;
   error?: ObsidianManageError | undefined;
 }): ObsidianManageNextAction[] {
-  const { status, operation, fromPath, toPath, path, trashFolder, error } = input;
+  const { status, operation, fromPath, toPath, path, trashFolder, trashPath, error } = input;
   switch (status) {
     case "preview": {
       if (operation === "trash_note") {
@@ -159,19 +180,35 @@ export function nextActionsFor(input: {
         if (trashFolder) params.trashFolder = trashFolder;
         return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit path/trashFolder.", params }];
       }
+      if (operation === "restore_note") {
+        const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "restore_note", dryRun: false };
+        if (trashPath) params.trashPath = trashPath;
+        if (toPath) params.toPath = toPath;
+        if (trashFolder) params.trashFolder = trashFolder;
+        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit trashPath/toPath/trashFolder.", params }];
+      }
       const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "move_note", dryRun: false };
       if (fromPath) params.fromPath = fromPath;
       if (toPath) params.toPath = toPath;
       return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit fromPath/toPath.", params }];
     }
     case "success":
-      return [{ priority: 1, action: "answer_success", label: operation === "trash_note" ? "Tell the user the note was moved to trash and cite only vault-relative source and trash paths." : "Tell the user the note was moved or renamed and cite only the vault-relative source and destination paths." }];
+      return [{ priority: 1, action: "answer_success", label: operation === "trash_note" ? "Tell the user the note was moved to trash and cite only vault-relative source and trash paths." : operation === "restore_note" ? "Tell the user the note was restored and cite only vault-relative trash source and destination paths." : "Tell the user the note was moved or renamed and cite only the vault-relative source and destination paths." }];
     case "not_found":
       if (error?.code === "PARENT_MISSING") {
+        if (operation === "restore_note") {
+          return [
+            { priority: 1, action: "create_parent_folder", label: "Ask the user whether to create the missing destination parent folder explicitly with obsidian_write create_folder before retrying restore_note." },
+            toPath ? { priority: 2, action: "retry_with_to_path", label: "Retry restore_note with a destination path whose parent folder already exists.", params: { operation: "restore_note", trashPath, toPath, trashFolder, dryRun: true } } : { priority: 2, action: "retry_with_to_path", label: "Retry restore_note with a destination path whose parent folder already exists." },
+          ];
+        }
         return [
           { priority: 1, action: "create_parent_folder", label: "Create the missing destination parent folder explicitly before retrying move_note." },
           toPath ? { priority: 2, action: "retry_with_to_path", label: "Retry with a destination path whose parent folder already exists.", params: { operation: "move_note", fromPath, toPath, dryRun: true } } : { priority: 2, action: "retry_with_to_path", label: "Retry with a destination path whose parent folder already exists." },
         ];
+      }
+      if (operation === "restore_note") {
+        return [trashPath ? { priority: 1, action: "retry_with_trash_path", label: "Retry only after the user provides an existing trashed Markdown note path inside the selected trashFolder.", params: { operation: "restore_note", trashPath, toPath, trashFolder, dryRun: true } } : { priority: 1, action: "retry_with_trash_path", label: "Retry only after the user provides an existing trashed Markdown note path inside the selected trashFolder." }];
       }
       if (operation === "trash_note") {
         return [path ? { priority: 1, action: "retry_with_path", label: "Retry only after the user provides an existing source Markdown note path to trash.", params: { operation: "trash_note", path, trashFolder, dryRun: true } } : { priority: 1, action: "retry_with_path", label: "Retry only after the user provides an existing source Markdown note path to trash." }];
@@ -182,6 +219,11 @@ export function nextActionsFor(input: {
         if (error?.code === "TRASH_FOLDER_NOT_FOLDER") return [{ priority: 1, action: "retry_with_trash_folder", label: "Choose a different explicit safe trashFolder or remove the non-folder blocker outside this tool before retrying." }];
         return [{ priority: 1, action: "choose_different_path", label: "Choose a different explicit source note or safe trashFolder; obsidian_manage trash_note will not overwrite, suffix, auto-rename, or search for another trash target." }];
       }
+      if (operation === "restore_note") {
+        if (error?.code === "PARENT_NOT_FOLDER") return [{ priority: 1, action: "retry_with_to_path", label: "Choose a destination path whose parent is an existing folder; restore_note will not replace parent files." }];
+        if (error?.code === "TRASH_FOLDER_NOT_FOLDER") return [{ priority: 1, action: "retry_with_trash_folder", label: "Choose a different explicit safe trashFolder or remove the non-folder blocker outside this tool before retrying restore_note." }];
+        return [{ priority: 1, action: "choose_different_path", label: "Choose a different explicit destination path; obsidian_manage restore_note will not overwrite, suffix, auto-rename, or search for another target." }];
+      }
       return [{ priority: 1, action: "choose_different_path", label: "Choose a different explicit safe source/destination path; obsidian_manage will not overwrite, move folders, or replace parent files." }];
     case "setup_required":
       return [{ priority: 1, action: "configure_vault_path", label: "Configure a local readable and writable Obsidian vault path before retrying obsidian_manage." }];
@@ -189,9 +231,13 @@ export function nextActionsFor(input: {
       if (operation === "trash_note" || error?.code === "MISSING_PATH" || error?.code === "SOURCE_NOT_MARKDOWN") {
         return [{ priority: 1, action: "retry_with_path", label: "Retry with operation=trash_note, one explicit safe vault-relative Markdown path, optional safe trashFolder, and dryRun=true for preview." }];
       }
+      if (operation === "restore_note" || error?.code === "MISSING_TRASH_PATH" || error?.code === "TARGET_NOT_MARKDOWN") {
+        return [{ priority: 1, action: "retry_with_trash_path", label: "Retry with operation=restore_note, explicit safe vault-relative Markdown trashPath inside trashFolder, explicit safe Markdown toPath, optional safe trashFolder, and dryRun=true for preview." }];
+      }
       return [{ priority: 1, action: "retry_with_from_path", label: "Retry with operation=move_note, distinct explicit safe vault-relative Markdown fromPath and toPath, and dryRun=true for preview." }];
     case "safety_refusal":
       if (operation === "trash_note") return [{ priority: 1, action: "stop", label: "Do not retry this trash request until the unsafe source path, trashFolder, or forbidden operation is corrected." }];
+      if (operation === "restore_note") return [{ priority: 1, action: "stop", label: "Do not retry this restore request until the unsafe trashPath, toPath, trashFolder, or forbidden operation is corrected." }];
       return [{ priority: 1, action: "stop", label: "Do not retry this management request until the unsafe request or runtime problem is corrected." }];
     case "manage_failed":
     default:

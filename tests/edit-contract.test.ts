@@ -29,7 +29,7 @@ describe("obsidian_edit contract", () => {
     expect(surfaceText).toMatch(/replace_exact_text/);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
-    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, rename, move/i);
+    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, restore, rename, move/i);
   });
 
   it("returns structured setup_required without leaking local paths when no local vault root is configured", async () => {

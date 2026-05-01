@@ -76,6 +76,17 @@ export function normalizeTrashFolderTarget(input: string): string {
   return normalized;
 }
 
+export function normalizeRestoreSourcePath(input: string): string {
+  return normalizeTrashSourcePath(input);
+}
+
+export function normalizeRestoreDestinationPath(input: string): string {
+  assertNoTrashSelectorSyntax(input);
+  const normalized = normalizeVaultRelativePath(input, { allowEmpty: false, requireMarkdown: true });
+  assertNoTrashSelectorSyntax(normalized);
+  return normalized;
+}
+
 export function isSafeMarkdownPath(input: string): boolean {
   try {
     normalizeVaultRelativePath(input, { allowEmpty: false, requireMarkdown: true });

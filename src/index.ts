@@ -71,7 +71,7 @@ const ObsidianWriteParams = Type.Object({
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes or folders. Set false only after explicit confirmation." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create, append, and create_folder. dryRun defaults to true. Markdown note operations require explicit safe vault-relative .md paths and non-empty content; create_folder requires an explicit safe vault-relative folder path and rejects content with CONTENT_NOT_ALLOWED. No overwrite, delete, trash, rename, move, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
+  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create, append, and create_folder. dryRun defaults to true. Markdown note operations require explicit safe vault-relative .md paths and non-empty content; create_folder requires an explicit safe vault-relative folder path and rejects content with CONTENT_NOT_ALLOWED. No overwrite, delete, trash, restore, rename, move, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 const ObsidianEditParams = Type.Object({
@@ -86,19 +86,20 @@ const ObsidianEditParams = Type.Object({
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes. Set false only after explicit confirmation." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, trash, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
+  description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, trash, restore, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
 });
 
 const ObsidianManageParams = Type.Object({
-  operation: Type.Optional(Type.String({ description: "Manage operation. Supported semantic values are exactly move_note and trash_note; forbidden operations return safety_refusal." })),
+  operation: Type.Optional(Type.String({ description: "Manage operation. Supported semantic values are exactly move_note, trash_note, and restore_note; forbidden operations return safety_refusal." })),
   fromPath: Type.Optional(Type.String({ description: "For move_note only: explicit safe vault-relative Markdown source note path. obsidian_manage never infers sources from search, title, alias, or folder scans." })),
-  toPath: Type.Optional(Type.String({ description: "For move_note only: explicit safe vault-relative Markdown destination note path. Destination must not exist and its parent folder must already exist." })),
+  toPath: Type.Optional(Type.String({ description: "For move_note and restore_note: explicit safe vault-relative Markdown destination note path. Destination must not exist and its parent folder must already exist." })),
   path: Type.Optional(Type.String({ description: "For trash_note only: explicit safe vault-relative Markdown source note path. obsidian_manage never infers sources, supports wildcards, or accepts bulk paths." })),
-  trashFolder: Type.Optional(Type.String({ description: "For trash_note only: optional explicit safe vault-relative folder path. Defaults to _Trash when omitted; must not be hidden, .obsidian, root, absolute, traversal, wildcard/bulk-looking, or extension-looking." })),
+  trashPath: Type.Optional(Type.String({ description: "For restore_note only: explicit safe vault-relative Markdown source note path inside the selected/default trashFolder. obsidian_manage never infers restore sources." })),
+  trashFolder: Type.Optional(Type.String({ description: "For trash_note and restore_note: optional explicit safe vault-relative folder path. Defaults to _Trash when omitted; must not be hidden, .obsidian, root, absolute, traversal, wildcard/bulk-looking, or extension-looking." })),
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without moving anything. Set false only after explicit confirmation." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_manage arguments. Supported top-level fields only: operation, fromPath, toPath, path, trashFolder, dryRun. Supported operations are exactly move_note and trash_note. move_note moves or renames exactly one existing Markdown note from an explicit safe vault-relative fromPath to an explicit safe vault-relative toPath. trash_note recoverably moves exactly one existing Markdown note from explicit path into default _Trash or an explicit safe trashFolder. dryRun defaults to true. No permanent delete, folder delete, recursive/wildcard/bulk delete, non-Markdown delete, folder moves, overwrite, copy, link rewrite, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
+  description: "obsidian_manage arguments. Supported top-level fields only: operation, fromPath, toPath, path, trashPath, trashFolder, dryRun. Supported operations are exactly move_note, trash_note, and restore_note. move_note moves or renames exactly one existing Markdown note from explicit safe fromPath to safe toPath. trash_note recoverably moves exactly one existing Markdown note from explicit path into default _Trash or an explicit safe trashFolder. restore_note restores exactly one Markdown note from explicit trashPath inside the selected/default safe trashFolder to explicit safe toPath. dryRun defaults to true. No permanent delete, folder delete, recursive/wildcard/bulk restore/delete, non-Markdown restore/delete, folder moves/restores, overwrite, copy, link rewrite, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
@@ -145,7 +146,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "For Markdown notes, obsidian_write requires operation=create or operation=append, an explicit safe vault-relative .md path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
       "For folders, obsidian_write requires operation=create_folder and an explicit safe vault-relative folder path; omit content, because supplied content is rejected with CONTENT_NOT_ALLOWED and no file is created or modified.",
       "obsidian_write appends Markdown exactly as supplied for append; include desired leading newlines, headings, or separators in content.",
-      "obsidian_write refuses overwrite, delete, trash, rename, move, open UI, shell, network, scan, discovery, and arbitrary CLI requests with safety_refusal.",
+      "obsidian_write refuses overwrite, delete, trash, restore, rename, move, open UI, shell, network, scan, discovery, and arbitrary CLI requests with safety_refusal.",
       "Use obsidian_retrieve for reading/searching Obsidian; obsidian_retrieve remains read-only. Use obsidian_edit only for controlled edits to existing Markdown notes.",
     ],
     parameters: ObsidianWriteParams,
@@ -168,8 +169,8 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "For replace_exact_text, oldText must match exactly once with no regex, fuzzy, semantic, normalized, or inferred matching; duplicate or missing oldText fails without mutation.",
       "Section headings must be exact ATX Markdown headings such as ## Plan; duplicate matching headings return ambiguity and must not be resolved automatically.",
       "Frontmatter edits affect only top-of-file YAML frontmatter; update_frontmatter may create frontmatter, remove_frontmatter requires an existing property.",
-      "obsidian_edit refuses create, full-note overwrite, delete, trash, rename, move, open UI, shell, network, regex, fuzzy, scan, and arbitrary CLI requests with safety_refusal.",
-      "Use obsidian_write only for create/append/create_folder; use obsidian_manage only for move_note or trash_note; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and keep folder creation/move/trash management out of obsidian_edit."
+      "obsidian_edit refuses create, full-note overwrite, delete, trash, restore, rename, move, open UI, shell, network, regex, fuzzy, scan, and arbitrary CLI requests with safety_refusal.",
+      "Use obsidian_write only for create/append/create_folder; use obsidian_manage only for move_note, trash_note, or restore_note; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and keep folder creation/move/trash/restore management out of obsidian_edit."
     ],
     parameters: ObsidianEditParams,
     async execute(_toolCallId: string, params: ObsidianEditRequest) {
@@ -182,17 +183,19 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_manage",
     label: "Obsidian Manage",
-    description: "Safely move, rename, or recoverably trash exactly one existing Markdown note in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve, obsidian_write, and obsidian_edit. Supports only operation=move_note or operation=trash_note. move_note uses fromPath/toPath; trash_note uses path plus optional trashFolder defaulting to _Trash. dryRun defaults to true. Never permanently deletes, deletes folders, processes recursive/wildcard/bulk paths, overwrites, copies, rewrites links, opens the UI, runs shell/network calls, scans the vault, discovers filesystem structure, or executes arbitrary CLI commands.",
-    promptSnippet: "Use obsidian_manage only for explicit safe single-note move/rename requests with operation=move_note or recoverable single-note trash requests with operation=trash_note. Prefer dryRun=true previews before committing with dryRun=false.",
+    description: "Safely move, rename, recoverably trash, or restore exactly one existing Markdown note in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve, obsidian_write, and obsidian_edit. Supports only operation=move_note, operation=trash_note, or operation=restore_note. move_note uses fromPath/toPath; trash_note uses path plus optional trashFolder defaulting to _Trash; restore_note uses explicit trashPath inside selected/default trashFolder plus explicit toPath. dryRun defaults to true. Never permanently deletes, deletes folders, processes recursive/wildcard/bulk paths, overwrites, copies, rewrites links, opens the UI, runs shell/network calls, scans the vault, discovers filesystem structure, or executes arbitrary CLI commands.",
+    promptSnippet: "Use obsidian_manage only for explicit safe single-note move/rename, recoverable trash, or restore-from-trash requests. Prefer dryRun=true previews before committing with dryRun=false.",
     promptGuidelines: [
-      "Use obsidian_manage only when the user wants to move/rename exactly one existing Markdown note from explicit safe vault-relative fromPath to toPath, or recoverably trash exactly one existing Markdown note from explicit safe vault-relative path.",
-      "obsidian_manage supports only operation=move_note and operation=trash_note. Do not use it for permanent delete, folder delete, recursive delete, wildcard delete, bulk delete, non-Markdown delete, folder moves, multi-note moves, copy, overwrite, link rewriting, UI open, shell, network, scan, discovery, or arbitrary commands.",
+      "Use obsidian_manage only when the user wants to move/rename exactly one existing Markdown note from explicit safe vault-relative fromPath to toPath, recoverably trash exactly one Markdown note from explicit safe path, or restore exactly one Markdown note from explicit safe trashPath inside trashFolder to explicit safe toPath.",
+      "obsidian_manage supports only operation=move_note, operation=trash_note, and operation=restore_note. Do not use it for permanent delete, folder delete, recursive delete/restore, wildcard delete/restore, bulk delete/restore, non-Markdown delete/restore, folder moves/restores, multi-note moves/restores, copy, overwrite, link rewriting, UI open, shell, network, scan, discovery, or arbitrary commands.",
       "Use obsidian_manage with dryRun=true or omitted to preview; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
       "move_note requires fromPath and toPath to be different safe vault-relative .md paths. The source note must already exist, the destination must not exist, and the destination parent folder must already exist.",
       "trash_note requires path to be an explicit safe vault-relative .md note path. Optional trashFolder must be an explicit safe vault-relative folder path; when omitted it defaults to _Trash.",
       "trash_note creates the safe trash folder only when committed with dryRun=false, moves exactly one Markdown note to the computed trash path, and returns conflict/TRASH_TARGET_EXISTS without overwrite, suffixing, or auto-rename if the target already exists.",
-      "If the destination parent folder is missing for move_note, obsidian_manage returns status=not_found with error.code=PARENT_MISSING; create the folder separately with obsidian_write create_folder only if the user requests it.",
-      "obsidian_manage responses expose only vault-relative paths and never expose the vault root, absolute source/destination/trash paths, absolute CLI paths, or lock keys.",
+      "restore_note requires trashPath to be an explicit safe vault-relative .md note path inside the selected/default trashFolder and toPath to be an explicit safe vault-relative .md destination whose parent already exists.",
+      "restore_note never creates destination parents, overwrites, suffixes, auto-renames, copies, rewrites links, searches the trash folder, restores folders, or restores non-Markdown files.",
+      "If the destination parent folder is missing for move_note or restore_note, obsidian_manage returns status=not_found with error.code=PARENT_MISSING; create the folder separately with obsidian_write create_folder only if the user requests it.",
+      "obsidian_manage responses expose only vault-relative paths and never expose the vault root, absolute source/destination/trash/restore paths, absolute CLI paths, or lock keys.",
       "Keep obsidian_retrieve read-only, obsidian_write limited to create/append/create_folder, and obsidian_edit limited to controlled content edits of existing Markdown notes.",
     ],
     parameters: ObsidianManageParams,

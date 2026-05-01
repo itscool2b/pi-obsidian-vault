@@ -89,8 +89,18 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await pathExists(vaultRoot, movedPath)).toBe(false);
       expect(await readNote(vaultRoot, trashPath)).toBe(beforeMoveContent);
 
+      const previewRestore = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "restore_note", trashPath, toPath: movedPath });
+      expect(previewRestore).toMatchObject({ status: "preview", dryRun: true, committed: false, trashFolder: "_Trash", trashPath, toPath: movedPath });
+      expect(await pathExists(vaultRoot, trashPath)).toBe(true);
+      expect(await pathExists(vaultRoot, movedPath)).toBe(false);
+
+      const commitRestore = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "restore_note", trashPath, toPath: movedPath, dryRun: false });
+      expect(commitRestore).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath, toPath: movedPath });
+      expect(await pathExists(vaultRoot, trashPath)).toBe(false);
+      expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
+
       const beforeFinalRetrieve = await vaultSnapshot(vaultRoot);
-      await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "trash delete move Smoke Plan", mode: "search", budget: "tiny" });
+      await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "trash restore delete move Smoke Plan", mode: "search", budget: "tiny" });
       expect(await vaultSnapshot(vaultRoot)).toEqual(beforeFinalRetrieve);
       expect(unexpectedFakeCliSideEffectCalls(backend)).toEqual([]);
 
@@ -100,7 +110,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(status.message).not.toContain(vaultRoot);
       expect(status.message).not.toMatch(/\/tmp\/pi-obsidian-write-/);
 
-      for (const output of [previewFolder, commitFolder, previewCreate, commitCreate, previewAppend, commitAppend, retrieval, previewSection, commitSection, previewExact, commitExact, previewFrontmatter, commitFrontmatter, previewMove, commitMove, previewTrash, commitTrash]) {
+      for (const output of [previewFolder, commitFolder, previewCreate, commitCreate, previewAppend, commitAppend, retrieval, previewSection, commitSection, previewExact, commitExact, previewFrontmatter, commitFrontmatter, previewMove, commitMove, previewTrash, commitTrash, previewRestore, commitRestore]) {
         expectNoLocalPathLeak(output, vaultRoot);
       }
     });

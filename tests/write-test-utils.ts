@@ -60,6 +60,17 @@ export async function expectNoteUnchanged(vaultRoot: string, relativePath: strin
   if (actual !== expectedContent) throw new Error(`Expected ${relativePath} to remain unchanged.`);
 }
 
+export async function expectRestoredNote(vaultRoot: string, trashPath: string, toPath: string, expectedContent: string): Promise<void> {
+  await expectPathMissing(vaultRoot, trashPath);
+  const actual = await readNote(vaultRoot, toPath);
+  if (actual !== expectedContent) throw new Error(`Expected restored note ${toPath} to contain original trash content.`);
+}
+
+export async function expectRestorePreviewUnchanged(vaultRoot: string, trashPath: string, toPath: string, expectedContent: string): Promise<void> {
+  await expectNoteUnchanged(vaultRoot, trashPath, expectedContent);
+  if (await pathExists(vaultRoot, toPath)) throw new Error(`Expected restore destination ${toPath} to remain missing during preview.`);
+}
+
 export function absoluteNotePath(vaultRoot: string, relativePath: string): string {
   return path.join(vaultRoot, ...relativePath.split("/"));
 }
