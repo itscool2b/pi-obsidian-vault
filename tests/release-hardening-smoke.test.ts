@@ -10,6 +10,7 @@ describe("release hardening temporary-vault smoke", () => {
       const { pi, backend } = registerVaultExtensionForTest(vaultRoot);
       const notePath = "Smoke/Workspace/Plan.md";
       const movedPath = "Smoke/Archive/Plan.md";
+      const copyPath = "Smoke/Archive/Plan Copy.md";
       const trashPath = "_Trash/Plan.md";
       const initialContent = "# Plan\n\n## Log\nInitial line.\n\n## Section\nOld section text.\n\n## Tail\nEnd.\n";
 
@@ -39,7 +40,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await readNote(vaultRoot, notePath)).toContain("Append marker: alpha.");
 
       const beforeRetrieve = await vaultSnapshot(vaultRoot);
-      const retrieval = await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "create move trash delete Smoke Plan", mode: "search", budget: "tiny" });
+      const retrieval = await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "create move trash restore copy delete Smoke Plan", mode: "search", budget: "tiny" });
       expect(retrieval.warnings.join("\n")).toMatch(/read-only/i);
       expect(unexpectedFakeCliSideEffectCalls(backend)).toEqual([]);
       expect(await vaultSnapshot(vaultRoot)).toEqual(beforeRetrieve);
@@ -99,8 +100,18 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await pathExists(vaultRoot, trashPath)).toBe(false);
       expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
 
+      const previewCopy = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "copy_note", fromPath: movedPath, toPath: copyPath });
+      expect(previewCopy).toMatchObject({ status: "preview", dryRun: true, committed: false, fromPath: movedPath, toPath: copyPath, preview: { wouldCopy: true } });
+      expect(await pathExists(vaultRoot, copyPath)).toBe(false);
+      expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
+
+      const commitCopy = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "copy_note", fromPath: movedPath, toPath: copyPath, dryRun: false });
+      expect(commitCopy).toMatchObject({ status: "success", dryRun: false, committed: true, fromPath: movedPath, toPath: copyPath, target: { sourceExistsAfter: true, destinationExistsAfter: true, bytesPreserved: true } });
+      expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
+      expect(await readNote(vaultRoot, copyPath)).toBe(beforeMoveContent);
+
       const beforeFinalRetrieve = await vaultSnapshot(vaultRoot);
-      await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "trash restore delete move Smoke Plan", mode: "search", budget: "tiny" });
+      await executeTool<ObsidianRetrieveOutput>(pi, "obsidian_retrieve", { query: "trash restore delete move copy Smoke Plan", mode: "search", budget: "tiny" });
       expect(await vaultSnapshot(vaultRoot)).toEqual(beforeFinalRetrieve);
       expect(unexpectedFakeCliSideEffectCalls(backend)).toEqual([]);
 
@@ -110,7 +121,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(status.message).not.toContain(vaultRoot);
       expect(status.message).not.toMatch(/\/tmp\/pi-obsidian-write-/);
 
-      for (const output of [previewFolder, commitFolder, previewCreate, commitCreate, previewAppend, commitAppend, retrieval, previewSection, commitSection, previewExact, commitExact, previewFrontmatter, commitFrontmatter, previewMove, commitMove, previewTrash, commitTrash, previewRestore, commitRestore]) {
+      for (const output of [previewFolder, commitFolder, previewCreate, commitCreate, previewAppend, commitAppend, retrieval, previewSection, commitSection, previewExact, commitExact, previewFrontmatter, commitFrontmatter, previewMove, commitMove, previewTrash, commitTrash, previewRestore, commitRestore, previewCopy, commitCopy]) {
         expectNoLocalPathLeak(output, vaultRoot);
       }
     });

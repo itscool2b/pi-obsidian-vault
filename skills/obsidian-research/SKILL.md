@@ -1,11 +1,11 @@
 ---
 name: obsidian-research
-description: Retrieve compact Obsidian vault context for research tasks through the read-only obsidian_retrieve tool. Safe Markdown create/append and folder creation are handled separately by obsidian_write, safe structured edits by obsidian_edit, and safe single-note moves/renames/trash/restores by obsidian_manage.
+description: Retrieve compact Obsidian vault context for research tasks through the read-only obsidian_retrieve tool. Safe Markdown create/append and folder creation are handled separately by obsidian_write, safe structured edits by obsidian_edit, and safe single-note moves/renames/trash/restores/copies by obsidian_manage.
 ---
 
 # Obsidian Research
 
-Use `obsidian_retrieve` for all Obsidian vault retrieval. Use `obsidian_write` only for explicit Markdown create/append or safe folder creation requests, use `obsidian_edit` only for explicit structured edits to existing Markdown notes, and use `obsidian_manage` only for explicit safe single-note move/rename, recoverable trash, or restore-from-trash requests.
+Use `obsidian_retrieve` for all Obsidian vault retrieval. Use `obsidian_write` only for explicit Markdown create/append or safe folder creation requests, use `obsidian_edit` only for explicit structured edits to existing Markdown notes, and use `obsidian_manage` only for explicit safe single-note move/rename, recoverable trash, restore-from-trash, or byte-for-byte copy requests.
 
 ## Workflow
 
@@ -38,6 +38,7 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval. Use `obsidian_write` o
 - For explicit safe single-note move/rename requests, use the separate `obsidian_manage` tool with `operation: "move_note"`, explicit safe vault-relative Markdown `fromPath` and `toPath`, and `dryRun` preview first. Do not route moves through retrieval, `obsidian_write`, or `obsidian_edit`.
 - For explicit safe recoverable single-note trash requests, use the separate `obsidian_manage` tool with `operation: "trash_note"`, explicit safe vault-relative Markdown `path`, optional explicit safe vault-relative `trashFolder`, and `dryRun` preview first. If `trashFolder` is omitted it defaults to `_Trash`. Do not route trash through retrieval, `obsidian_write`, or `obsidian_edit`.
 - For explicit safe single-note restore requests, use the separate `obsidian_manage` tool with `operation: "restore_note"`, explicit safe vault-relative Markdown `trashPath` inside the selected/default `trashFolder`, explicit safe vault-relative Markdown `toPath`, optional explicit safe `trashFolder`, and `dryRun` preview first. If `trashFolder` is omitted it defaults to `_Trash`. Do not infer restore sources from search, titles, aliases, metadata, or trash folder contents.
+- For explicit safe single-note copy requests, use the separate `obsidian_manage` tool with `operation: "copy_note"`, explicit safe vault-relative Markdown `fromPath` and `toPath`, and `dryRun` preview first. `copy_note` copies exactly one regular Markdown note byte-for-byte while leaving the source unchanged. Do not route copies through retrieval, `obsidian_write`, or `obsidian_edit`; do not infer copy sources or destinations from search results.
 - `obsidian_edit` supports only `replace_section`, `insert_under_heading`, `update_frontmatter`, `remove_frontmatter`, and `replace_exact_text` on explicit safe vault-relative Markdown paths to existing notes.
 - Use exact ATX Markdown headings for section edits, e.g. `## Plan`; duplicate or missing headings must be reported to the user instead of guessed.
 - Use frontmatter edits only for top-of-file YAML properties; `update_frontmatter` may create frontmatter, while `remove_frontmatter` requires the property to exist.
@@ -45,7 +46,8 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval. Use `obsidian_write` o
 - `obsidian_manage move_note` requires the source to exist, destination to be absent, destination parent folder to already exist, and missing destination parents return `status=not_found` with `error.code=PARENT_MISSING`.
 - `obsidian_manage trash_note` is recoverable move-to-trash, not permanent deletion. It requires the source note to exist, creates the safe trash folder only when committed with `dryRun:false`, and returns `status=conflict` with `error.code=TRASH_TARGET_EXISTS` if the computed final trash path already exists; do not suffix, auto-rename, overwrite, or search for alternatives.
 - `obsidian_manage restore_note` is a recoverable move out of trash, not a search or bulk recovery tool. It requires `trashPath` inside the selected/default `trashFolder`, `toPath` whose parent folder already exists, and returns deterministic errors such as `TRASH_PATH_OUTSIDE_TRASH`, `TRASH_SOURCE_NOT_FOUND`, `TARGET_EXISTS`, `PARENT_MISSING`, `TRASH_SOURCE_IS_FOLDER`, `TRASH_SOURCE_NOT_FILE`, `TRASH_SOURCE_NOT_MARKDOWN`, `TARGET_NOT_MARKDOWN`, and `SAME_PATH` without mutation.
-- Never use any Obsidian tool for full-note overwrite, permanent delete, folder delete, recursive delete/restore, wildcard delete/restore, bulk delete/restore, non-Markdown delete/restore, copy, folder moves/restores, destructive folder management, UI open, shell execution, network calls, broad scanning, filesystem discovery, regex/fuzzy/semantic replacement, inferred target text, link rewriting, or arbitrary CLI commands. Use `obsidian_manage` only for the explicit single-note `move_note`, recoverable `trash_note`, and explicit `restore_note` exceptions.
+- `obsidian_manage copy_note` requires the source to exist as one regular Markdown note, destination to be absent, destination parent folder to already exist, and distinct normalized paths. It returns deterministic errors such as `SOURCE_NOT_FOUND`, `SOURCE_IS_FOLDER`, `SOURCE_NOT_FILE`, `SOURCE_NOT_MARKDOWN`, `TARGET_NOT_MARKDOWN`, `SAME_PATH`, `TARGET_EXISTS`, `PARENT_MISSING`, and `PARENT_NOT_FOLDER` without partial mutation.
+- Never use any Obsidian tool for full-note overwrite, permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, destructive folder management, UI open, shell execution, network calls, broad scanning, filesystem discovery, regex/fuzzy/semantic replacement, inferred target text, link rewriting, overwrite-copy, or arbitrary CLI commands. Use `obsidian_manage` only for the explicit single-note `move_note`, recoverable `trash_note`, explicit `restore_note`, and explicit byte-for-byte `copy_note` exceptions.
 - Prefer `budget: "tiny"` for quick orientation, `budget: "standard"` for normal research, and `budget: "expanded"` only when bounded graph/context detail is needed.
 
 ## Good examples
@@ -90,4 +92,10 @@ Safe single-note restore preview:
 
 ```json
 { "operation": "restore_note", "trashPath": "_Trash/Plan.md", "toPath": "Projects/Plan.md", "dryRun": true }
+```
+
+Safe single-note copy preview:
+
+```json
+{ "operation": "copy_note", "fromPath": "Projects/Plan.md", "toPath": "Archive/Plan Copy.md", "dryRun": true }
 ```

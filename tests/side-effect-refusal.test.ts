@@ -21,8 +21,10 @@ describe("side-effect refusal", () => {
     expect(trashIntent.warnings.join("\n")).toMatch(/read-only/i);
     const restoreIntent = await obsidianRetrieve(seededFakeCli(), { query: "restore integrated gradients note from trash", mode: "search" });
     expect(restoreIntent.warnings.join("\n")).toMatch(/read-only/i);
-    expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note"]));
-    expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note"]));
+    const copyIntent = await obsidianRetrieve(seededFakeCli(), { query: "copy integrated gradients note", mode: "search" });
+    expect(copyIntent.warnings.join("\n")).toMatch(/read-only/i);
+    expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
+    expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
   });
 
   it("returns safety_refusal for forbidden write operations", async () => {
@@ -45,7 +47,7 @@ describe("side-effect refusal", () => {
 
   it("returns safety_refusal for forbidden manage operations", async () => {
     await withTempVault(async (vaultRoot) => {
-      for (const operation of ["create", "append", "overwrite", "delete", "remove", "unlink", "trash", "recycle", "recursive_delete", "bulk_delete", "wildcard_delete", "recursive_restore", "bulk_restore", "wildcard_restore", "rename", "move", "copy", "copy_note", "restore", "recover", "untrash", "open", "shell", "network", "scan", "command", "rewrite_links", "move_folder", "delete_folder", "trash_folder", "restore_folder"]) {
+      for (const operation of ["create", "append", "overwrite", "delete", "remove", "unlink", "trash", "recycle", "recursive_delete", "bulk_delete", "wildcard_delete", "recursive_restore", "bulk_restore", "wildcard_restore", "recursive_copy", "bulk_copy", "wildcard_copy", "rename", "move", "copy", "duplicate", "clone", "restore", "recover", "untrash", "open", "shell", "network", "scan", "command", "rewrite_links", "move_folder", "delete_folder", "trash_folder", "restore_folder", "copy_folder"]) {
         const result = await obsidianManage({ operation, fromPath: "Notes/Source.md", toPath: "Notes/Target.md", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }

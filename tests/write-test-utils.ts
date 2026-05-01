@@ -71,6 +71,17 @@ export async function expectRestorePreviewUnchanged(vaultRoot: string, trashPath
   if (await pathExists(vaultRoot, toPath)) throw new Error(`Expected restore destination ${toPath} to remain missing during preview.`);
 }
 
+export async function expectCopyPreviewUnchanged(vaultRoot: string, fromPath: string, toPath: string, expectedContent: string): Promise<void> {
+  await expectNoteUnchanged(vaultRoot, fromPath, expectedContent);
+  if (await pathExists(vaultRoot, toPath)) throw new Error(`Expected copy destination ${toPath} to remain missing during preview.`);
+}
+
+export async function expectCopiedNote(vaultRoot: string, fromPath: string, toPath: string, expectedContent: string): Promise<void> {
+  await expectNoteUnchanged(vaultRoot, fromPath, expectedContent);
+  const actual = await readNote(vaultRoot, toPath);
+  if (actual !== expectedContent) throw new Error(`Expected copied note ${toPath} to match source note content.`);
+}
+
 export function absoluteNotePath(vaultRoot: string, relativePath: string): string {
   return path.join(vaultRoot, ...relativePath.split("/"));
 }

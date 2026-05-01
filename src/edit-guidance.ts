@@ -1,13 +1,13 @@
 import type { EditPreview, EditTargetSummary, EditTransformResult, ObsidianEditError, ObsidianEditNextAction, ObsidianEditOperation, ObsidianEditOutput, ObsidianEditStatus } from "./edit-types.js";
 
 const PREVIEW_CHARS = 500;
-const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "replace_all", "regex_replace", "replace_regex", "fuzzy_replace", "semantic_replace", "inferred_replace", "truncate", "prepend", "delete", "remove", "unlink", "erase", "discard", "trash", "trash_note", "restore", "restore_note", "recycle", "rename", "move", "move_note", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "write", "create", "append", "create_folder"]);
+const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "replace_all", "regex_replace", "replace_regex", "fuzzy_replace", "semantic_replace", "inferred_replace", "truncate", "prepend", "delete", "remove", "unlink", "erase", "discard", "trash", "trash_note", "restore", "restore_note", "copy", "copy_note", "duplicate", "clone", "recycle", "rename", "move", "move_note", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "write", "create", "append", "create_folder"]);
 
 export function normalizeEditOperation(value: string | undefined): { operation?: ObsidianEditOperation | undefined; requested?: string | undefined; forbidden: boolean } {
   const requested = value?.trim().toLowerCase();
   if (!requested) return { forbidden: false };
   if (requested === "replace_section" || requested === "insert_under_heading" || requested === "update_frontmatter" || requested === "remove_frontmatter" || requested === "replace_exact_text") return { operation: requested, requested, forbidden: false };
-  const forbidden = FORBIDDEN_OPERATIONS.has(requested) || /overwrite|truncate|prepend|delete|remove|unlink|erase|discard|trash|restore|recycle|rename|move|open|launch|shell|bash|exec|command|curl|fetch|network|scan|discover|regex|fuzzy|semantic|inferred|replace_all|\bwrite\b/.test(requested);
+  const forbidden = FORBIDDEN_OPERATIONS.has(requested) || /overwrite|truncate|prepend|delete|remove|unlink|erase|discard|trash|restore|copy|duplicate|clone|recycle|rename|move|open|launch|shell|bash|exec|command|curl|fetch|network|scan|discover|regex|fuzzy|semantic|inferred|replace_all|\bwrite\b/.test(requested);
   return { requested, forbidden };
 }
 

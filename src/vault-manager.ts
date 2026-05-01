@@ -1,10 +1,10 @@
 import { constants as fsConstants } from "node:fs";
-import { access, lstat, mkdir, realpath, rename, stat } from "node:fs/promises";
+import { access, copyFile, lstat, mkdir, realpath, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { PathSafetyError } from "./errors.js";
-import { normalizeRestoreDestinationPath, normalizeRestoreSourcePath, normalizeTrashFolderTarget, normalizeTrashSourcePath, normalizeVaultRelativePath } from "./path-safety.js";
+import { normalizeCopyDestinationPath, normalizeCopySourcePath, normalizeRestoreDestinationPath, normalizeRestoreSourcePath, normalizeTrashFolderTarget, normalizeTrashSourcePath, normalizeVaultRelativePath } from "./path-safety.js";
 import { withTargetLocks } from "./target-lock.js";
-import type { ManageTargetSummary, RestoreTargetSummary, TrashTargetSummary } from "./manage-types.js";
+import type { CopyTargetSummary, ManageTargetSummary, RestoreTargetSummary, TrashTargetSummary } from "./manage-types.js";
 
 export interface VaultMoveInput {
   fromPath: string;
@@ -22,6 +22,11 @@ export interface VaultRestoreInput {
   toPath: string;
   trashFolder: string;
   trashFolderDefaulted?: boolean | undefined;
+}
+
+export interface VaultCopyInput {
+  fromPath: string;
+  toPath: string;
 }
 
 export class VaultManagerSafetyError extends Error {
@@ -59,11 +64,20 @@ export class VaultManagerRestoreError extends Error {
   }
 }
 
+export class VaultManagerCopyError extends Error {
+  constructor(message: string, public readonly code: "SAME_PATH" | "SOURCE_NOT_FOUND" | "SOURCE_NOT_MARKDOWN" | "SOURCE_IS_FOLDER" | "SOURCE_NOT_FILE" | "TARGET_NOT_MARKDOWN" | "TARGET_EXISTS" | "PARENT_MISSING" | "PARENT_NOT_FOLDER" | "COPY_FAILED") {
+    super(message);
+    this.name = "VaultManagerCopyError";
+  }
+}
+
 export interface VaultManager {
   normalizePath(input: string): string;
   normalizeTrashSourcePath(input: string): string;
   normalizeRestoreTrashPath(input: string): string;
   normalizeRestoreDestinationPath(input: string): string;
+  normalizeCopySourcePath(input: string): string;
+  normalizeCopyDestinationPath(input: string): string;
   normalizeTrashFolderPath(input: string): string;
   preview(input: VaultMoveInput): Promise<ManageTargetSummary>;
   commit(input: VaultMoveInput): Promise<ManageTargetSummary>;
@@ -71,6 +85,8 @@ export interface VaultManager {
   commitTrash(input: VaultTrashInput): Promise<TrashTargetSummary>;
   previewRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary>;
   commitRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary>;
+  previewCopy(input: VaultCopyInput): Promise<CopyTargetSummary>;
+  commitCopy(input: VaultCopyInput): Promise<CopyTargetSummary>;
 }
 
 export class LocalVaultManager implements VaultManager {
@@ -96,6 +112,14 @@ export class LocalVaultManager implements VaultManager {
 
   normalizeRestoreDestinationPath(input: string): string {
     return normalizeRestoreDestinationPath(input);
+  }
+
+  normalizeCopySourcePath(input: string): string {
+    return normalizeCopySourcePath(input);
+  }
+
+  normalizeCopyDestinationPath(input: string): string {
+    return normalizeCopyDestinationPath(input);
   }
 
   normalizeTrashFolderPath(input: string): string {
@@ -194,6 +218,36 @@ export class LocalVaultManager implements VaultManager {
       });
       const after = await stat(absoluteTo);
       return { ...target, trashSourceExistsAfter: false, destinationExistsAfter: true, bytesAfter: after.size };
+    });
+  }
+
+  async previewCopy(input: VaultCopyInput): Promise<CopyTargetSummary> {
+    const safeFromPath = this.normalizeCopySourcePath(input.fromPath);
+    const safeToPath = this.normalizeCopyDestinationPath(input.toPath);
+    return this.inspectCopy(safeFromPath, safeToPath, false);
+  }
+
+  async commitCopy(input: VaultCopyInput): Promise<CopyTargetSummary> {
+    const safeFromPath = this.normalizeCopySourcePath(input.fromPath);
+    const safeToPath = this.normalizeCopyDestinationPath(input.toPath);
+    const root = await this.vaultRootRealpath();
+    return withTargetLocks([`${root}::${safeFromPath}`, `${root}::${safeToPath}`], async () => {
+      const target = await this.inspectCopy(safeFromPath, safeToPath, true);
+      const absoluteFrom = await this.absoluteTargetPath(safeFromPath);
+      const absoluteTo = await this.absoluteTargetPath(safeToPath);
+      await copyFile(absoluteFrom, absoluteTo, fsConstants.COPYFILE_EXCL).catch(async (error: unknown) => {
+        if (isNodeError(error, "ENOENT")) {
+          const sourceInfo = await lstat(absoluteFrom).catch(() => undefined);
+          if (!sourceInfo) throw new VaultManagerCopyError("Source note is missing; copy_note will not create it.", "SOURCE_NOT_FOUND");
+          throw new VaultManagerCopyError("Destination parent folder is missing; copy_note will not create it.", "PARENT_MISSING");
+        }
+        if (isNodeError(error, "EEXIST")) throw new VaultManagerCopyError("Destination note already exists; copy_note will not overwrite it.", "TARGET_EXISTS");
+        if (isNodeError(error, "ENOTDIR")) throw new VaultManagerCopyError("Destination parent exists but is not a folder.", "PARENT_NOT_FOLDER");
+        if (isNodeError(error, "EISDIR")) throw new VaultManagerCopyError("Destination path already exists; copy_note will not overwrite it.", "TARGET_EXISTS");
+        throw error;
+      });
+      const after = await stat(absoluteTo);
+      return { ...target, sourceExistsAfter: true, destinationExistsAfter: true, bytesAfter: after.size, bytesPreserved: after.size === target.bytesBefore };
     });
   }
 
@@ -332,6 +386,48 @@ export class LocalVaultManager implements VaultManager {
     };
   }
 
+  private async inspectCopy(fromPath: string, toPath: string, forCommit: boolean): Promise<CopyTargetSummary> {
+    if (fromPath === toPath) throw new VaultManagerCopyError("Copy source and destination must be different vault-relative Markdown paths.", "SAME_PATH");
+
+    const absoluteFrom = await this.absoluteTargetPath(fromPath);
+    const absoluteTo = await this.absoluteTargetPath(toPath);
+    const parentPath = path.dirname(absoluteTo);
+
+    const sourceInfo = await lstat(absoluteFrom).catch(() => undefined);
+    if (!sourceInfo) throw new VaultManagerCopyError("Source note does not exist; copy_note will not infer or create it.", "SOURCE_NOT_FOUND");
+    await this.assertRealPathContained(absoluteFrom, "Source note resolves outside the configured vault.");
+    if (sourceInfo.isDirectory()) throw new VaultManagerCopyError("Source path is a folder; copy_note copies exactly one Markdown note only.", "SOURCE_IS_FOLDER");
+    if (!sourceInfo.isFile()) throw new VaultManagerCopyError("Source path is not a regular Markdown note file.", "SOURCE_NOT_FILE");
+
+    const destinationEntry = await lstat(absoluteTo).catch(() => undefined);
+    if (destinationEntry) throw new VaultManagerCopyError("Destination path already exists; copy_note will not overwrite it.", "TARGET_EXISTS");
+
+    const parentInfo = await stat(parentPath).catch(() => undefined);
+    if (!parentInfo) throw new VaultManagerCopyError("Destination parent folder does not exist; copy_note will not create it.", "PARENT_MISSING");
+    await this.assertRealPathContained(parentPath, "Destination parent folder resolves outside the configured vault.");
+    if (!parentInfo.isDirectory()) throw new VaultManagerCopyError("Destination parent exists but is not a folder.", "PARENT_NOT_FOLDER");
+
+    return {
+      fromPath,
+      toPath,
+      targetKind: "markdown",
+      sourceExistsBefore: true,
+      sourceExistsAfter: true,
+      destinationExistsBefore: false,
+      destinationExistsAfter: forCommit,
+      parentExistsBefore: true,
+      parentIsFolderBefore: true,
+      wouldOverwrite: false,
+      wouldCreateParent: false,
+      wouldMoveSource: false,
+      wouldDeleteSource: false,
+      wouldRewriteLinks: false,
+      bytesBefore: sourceInfo.size,
+      bytesAfter: forCommit ? sourceInfo.size : undefined,
+      bytesPreserved: forCommit ? true : undefined,
+    };
+  }
+
   private async absoluteTargetPath(safePath: string): Promise<string> {
     const root = await this.vaultRootRealpath();
     const absolutePath = path.resolve(root, ...safePath.split("/"));
@@ -416,6 +512,12 @@ export function manageErrorFromUnknown(error: unknown): { code: string; message:
     if (error.code === "TARGET_EXISTS" || error.code === "PARENT_NOT_FOLDER" || error.code === "TRASH_FOLDER_NOT_FOLDER") return { code: error.code, message: error.message, category: "conflict" };
     if (error.code === "TRASH_PATH_OUTSIDE_TRASH" || error.code === "TRASH_SOURCE_IS_FOLDER" || error.code === "TRASH_SOURCE_NOT_FILE") return { code: error.code, message: error.message, category: "safety" };
     return { code: "RESTORE_FAILED", message: error.message, category: "runtime" };
+  }
+  if (error instanceof VaultManagerCopyError) {
+    if (error.code === "SAME_PATH" || error.code === "SOURCE_NOT_MARKDOWN" || error.code === "SOURCE_IS_FOLDER" || error.code === "SOURCE_NOT_FILE" || error.code === "TARGET_NOT_MARKDOWN") return { code: error.code, message: error.message, category: "validation" };
+    if (error.code === "SOURCE_NOT_FOUND" || error.code === "PARENT_MISSING") return { code: error.code, message: error.message, category: "not_found" };
+    if (error.code === "TARGET_EXISTS" || error.code === "PARENT_NOT_FOLDER") return { code: error.code, message: error.message, category: "conflict" };
+    return { code: "COPY_FAILED", message: error.message, category: "runtime" };
   }
   if (error instanceof VaultManagerSetupError) return { code: error.code, message: error.message, category: "setup" };
   return { code: "MOVE_FAILED", message: "The note management operation could not be completed safely.", category: "runtime" };

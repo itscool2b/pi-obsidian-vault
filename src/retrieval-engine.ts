@@ -77,7 +77,7 @@ function resolveMode(request: RetrievalRequest): "search" | "context" | "graph" 
 function intentWarnings(request: RetrievalRequest): string[] {
   const query = request.query?.toLowerCase() ?? "";
   const warnings: string[] = [];
-  if (/\b(write|create|append|prepend|replace|edit|rename|delete|move|trash|restore|open)\b/.test(query)) {
+  if (/\b(write|create|append|prepend|replace|edit|rename|delete|move|trash|restore|copy|duplicate|clone|open)\b/.test(query)) {
     warnings.push("obsidian_retrieve is read-only; write/edit/manage/open intents are not executed and only retrieval candidates are returned.");
   }
   return warnings;

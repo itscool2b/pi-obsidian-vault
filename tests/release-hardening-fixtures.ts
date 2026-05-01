@@ -3,11 +3,10 @@ export const PUBLIC_TOOL_NAMES = ["obsidian_retrieve", "obsidian_write", "obsidi
 export const SUPPORTED_OPERATIONS = {
   obsidian_write: ["create", "append", "create_folder"],
   obsidian_edit: ["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"],
-  obsidian_manage: ["move_note", "trash_note", "restore_note"],
+  obsidian_manage: ["move_note", "trash_note", "restore_note", "copy_note"],
 } as const;
 
 export const FORBIDDEN_MUTATION_CAPABILITIES = [
-  "copy_note",
   "move_folder",
   "delete_folder",
   "trash_folder",
@@ -66,8 +65,17 @@ export const UNSAFE_RESTORE_PATHS = [
   "_Trash/[abc].md",
 ] as const;
 
+export const UNSAFE_COPY_PATHS = [
+  ...UNSAFE_NOTE_PATHS,
+  "Projects/*.md",
+  "Projects/**/Note.md",
+  "Projects/{A,B}.md",
+  "Projects/[abc].md",
+  "Projects/One.md,Projects/Two.md",
+] as const;
+
 export function assertNoForbiddenOperationText(text: string): void {
-  if (/copy_note|permanent_delete|batch operation|wildcard operation|recursive operation/i.test(text)) {
+  if (/permanent_delete|batch operation|wildcard operation|recursive operation/i.test(text)) {
     throw new Error(`Unexpected unsupported capability text: ${text}`);
   }
 }

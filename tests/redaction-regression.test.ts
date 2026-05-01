@@ -64,7 +64,14 @@ describe("release redaction regression", () => {
       const restoreSafety = await obsidianManage({ operation: "restore_note", trashPath: "OtherTrash/Restore.md", toPath: "Archive/Restore2.md" }, { vaultRoot });
       const restoreConflict = await obsidianManage({ operation: "restore_note", trashPath: "_Trash/Conflict.md", toPath: "Archive/Restore.md" }, { vaultRoot });
       const restoreNotFound = await obsidianManage({ operation: "restore_note", trashPath: "_Trash/Missing.md", toPath: "Archive/Missing.md" }, { vaultRoot });
-      for (const result of [preview, success, validation, safety, conflict, trashPreview, trashSuccess, restorePreview, restoreSuccess, restoreValidation, restoreSafety, restoreConflict, restoreNotFound]) {
+      await seedNote(vaultRoot, "Copy/Source.md", "copy");
+      const copyPreview = await obsidianManage({ operation: "copy_note", fromPath: "Copy/Source.md", toPath: "Archive/Copy.md" }, { vaultRoot });
+      const copySuccess = await obsidianManage({ operation: "copy_note", fromPath: "Copy/Source.md", toPath: "Archive/Copy.md", dryRun: false }, { vaultRoot });
+      const copyValidation = await obsidianManage({ operation: "copy_note", fromPath: "Copy/Source.txt", toPath: "Archive/Copy2.md" }, { vaultRoot });
+      const copySafety = await obsidianManage({ operation: "copy_note", fromPath: "../outside.md", toPath: "Archive/Copy3.md" }, { vaultRoot });
+      const copyConflict = await obsidianManage({ operation: "copy_note", fromPath: "Copy/Source.md", toPath: "Archive/Copy.md" }, { vaultRoot });
+      const copyNotFound = await obsidianManage({ operation: "copy_note", fromPath: "Copy/Missing.md", toPath: "Archive/MissingCopy.md" }, { vaultRoot });
+      for (const result of [preview, success, validation, safety, conflict, trashPreview, trashSuccess, restorePreview, restoreSuccess, restoreValidation, restoreSafety, restoreConflict, restoreNotFound, copyPreview, copySuccess, copyValidation, copySafety, copyConflict, copyNotFound]) {
         assertNoLeakedPaths(result, vaultRoot, ["../outside.md"]);
         expect(JSON.stringify(result.nextActions)).not.toContain(vaultRoot);
         expect(JSON.stringify(result.warnings)).not.toContain(vaultRoot);
@@ -80,7 +87,8 @@ describe("release redaction regression", () => {
         const edit = await obsidianEdit({ operation: "update_frontmatter", path: unsafe, property: "status", value: "x", dryRun: false }, { vaultRoot });
         const manage = await obsidianManage({ operation: "trash_note", path: unsafe, dryRun: false }, { vaultRoot });
         const restore = await obsidianManage({ operation: "restore_note", trashPath: unsafe, toPath: "Notes/Restored.md", dryRun: false }, { vaultRoot });
-        for (const result of [write, edit, manage, restore]) {
+        const copy = await obsidianManage({ operation: "copy_note", fromPath: unsafe, toPath: "Notes/Copied.md", dryRun: false }, { vaultRoot });
+        for (const result of [write, edit, manage, restore, copy]) {
           expect(result.committed).toBe(false);
           assertNoLeakedPaths(result, vaultRoot, [unsafe]);
         }

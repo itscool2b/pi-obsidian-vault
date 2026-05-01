@@ -28,7 +28,7 @@ describe("public tool surface", () => {
   it("keeps the public operation matrix limited to the release-hardened surface", () => {
     expect(SUPPORTED_OPERATIONS.obsidian_write).toEqual(["create", "append", "create_folder"]);
     expect(SUPPORTED_OPERATIONS.obsidian_edit).toEqual(["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"]);
-    expect(SUPPORTED_OPERATIONS.obsidian_manage).toEqual(["move_note", "trash_note", "restore_note"]);
+    expect(SUPPORTED_OPERATIONS.obsidian_manage).toEqual(["move_note", "trash_note", "restore_note", "copy_note"]);
   });
 
   it("publishes a strict, example-driven obsidian_retrieve schema without unsupported agent-style fields", () => {
@@ -91,11 +91,11 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/newText/);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
-    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, restore, rename, move/i);
+    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, restore, copy, rename, move/i);
     expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
   });
 
-  it("publishes a strict obsidian_manage schema for move_note, trash_note, and restore_note only", () => {
+  it("publishes a strict obsidian_manage schema for move_note, trash_note, restore_note, and copy_note only", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     const schema = pi.tools.get("obsidian_manage").parameters;
@@ -108,12 +108,15 @@ describe("public tool surface", () => {
     expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md", trashFolder: "Archive/Trash", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "restore_note", trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md" })).toBe(true);
     expect(Value.Check(schema, { operation: "restore_note", trashPath: "Archive/Trash/Plan.md", toPath: "Projects/Plan.md", trashFolder: "Archive/Trash", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
+    expect(Value.Check(schema, { operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", content: "x" })).toBe(false);
     expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md", recursive: true })).toBe(false);
     const surfaceText = [pi.tools.get("obsidian_manage").description, pi.tools.get("obsidian_manage").promptSnippet, ...(pi.tools.get("obsidian_manage").promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/move_note/);
     expect(surfaceText).toMatch(/trash_note/);
     expect(surfaceText).toMatch(/restore_note/);
+    expect(surfaceText).toMatch(/copy_note/);
     expect(surfaceText).toMatch(/fromPath/);
     expect(surfaceText).toMatch(/toPath/);
     expect(surfaceText).toMatch(/trashPath/);
@@ -122,6 +125,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/TRASH_TARGET_EXISTS/);
     expect(surfaceText).toMatch(/PARENT_MISSING/);
     expect(surfaceText).toMatch(/dryRun/i);
+    expect(surfaceText).toMatch(/byte/i);
     expect(surfaceText).toMatch(/overwrite/i);
     expect(surfaceText).toMatch(/link/i);
   });
