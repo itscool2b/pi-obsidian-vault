@@ -5,6 +5,8 @@ import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
 import { OBSIDIAN_RETRIEVE_BUDGETS, registerObsidianVault } from "../src/index.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
+import { PUBLIC_TOOL_NAMES, SUPPORTED_OPERATIONS } from "./release-hardening-fixtures.js";
+import { requireCapabilities } from "./status-test-utils.js";
 
 function fakePi() {
   return {
@@ -19,8 +21,14 @@ describe("public tool surface", () => {
   it("registers obsidian_retrieve, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
     expect([...pi.commands.keys()]).toEqual(["obsidian-vault"]);
+  });
+
+  it("keeps the public operation matrix limited to the release-hardened surface", () => {
+    expect(SUPPORTED_OPERATIONS.obsidian_write).toEqual(["create", "append", "create_folder"]);
+    expect(SUPPORTED_OPERATIONS.obsidian_edit).toEqual(["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"]);
+    expect(SUPPORTED_OPERATIONS.obsidian_manage).toEqual(["move_note", "trash_note"]);
   });
 
   it("publishes a strict, example-driven obsidian_retrieve schema without unsupported agent-style fields", () => {
@@ -123,6 +131,7 @@ describe("public tool surface", () => {
     const message = messages.join("\n");
     expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
     expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
+    requireCapabilities(message);
     expect(message).not.toContain(tempRoot);
     expect(message).not.toMatch(/\/tmp\/pi-obsidian-status-vault/);
   });
@@ -152,6 +161,7 @@ describe("public tool surface", () => {
       expect(message).toContain("CLI: configured absolute path redacted");
       expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
       expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
+      requireCapabilities(message);
       expect(message).not.toContain(vaultRoot);
       expect(message).not.toContain(absoluteTargetPath);
       expect(message).not.toContain(absoluteCliPath);

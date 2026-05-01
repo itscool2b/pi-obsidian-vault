@@ -8,6 +8,7 @@ import { expectNoLocalPathLeak, seedNote, withTempVault } from "./write-test-uti
 const unsafePaths = [
   "/tmp/outside.md",
   "C:\\Users\\me\\outside.md",
+  "\\\\server\\share\\outside.md",
   "../outside.md",
   "Folder/%2e%2e/outside.md",
   "Folder/%25252e%25252e/outside.md",
@@ -15,6 +16,10 @@ const unsafePaths = [
   "Notes/file.txt",
   ".hidden/Note.md",
   "Notes/./Bad.md",
+  "",
+  "   ",
+  ".",
+  "@",
 ];
 
 describe("obsidian_edit path safety", () => {

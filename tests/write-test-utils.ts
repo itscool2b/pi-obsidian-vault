@@ -1,8 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir, stat, readdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { registerObsidianVault } from "../src/index.js";
-import { seededFakeCli } from "./fake-obsidian-cli.js";
+import { FakeObsidianCliBackend, seededFakeCli } from "./fake-obsidian-cli.js";
 
 export async function withTempVault<T>(run: (vaultRoot: string) => Promise<T>): Promise<T> {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "pi-obsidian-write-"));
@@ -89,6 +89,57 @@ export function registerManageTool(vaultRoot: string) {
   const pi = fakePi();
   registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
   return pi.tools.get("obsidian_manage");
+}
+
+export function registerVaultExtensionForTest(vaultRoot: string, backend: FakeObsidianCliBackend = seededFakeCli()) {
+  const pi = fakePi();
+  registerObsidianVault(pi as any, { backend, env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  return { pi, backend };
+}
+
+export async function executeTool<T = any>(pi: ReturnType<typeof fakePi>, toolName: string, params: unknown): Promise<T> {
+  const tool = pi.tools.get(toolName);
+  if (!tool) throw new Error(`Missing registered tool ${toolName}.`);
+  const response = await tool.execute("test-call", params);
+  return response.details as T;
+}
+
+export async function runStatusCommand(pi: ReturnType<typeof fakePi>): Promise<{ message: string; level: string | undefined }> {
+  const command = pi.commands.get("obsidian-vault");
+  if (!command) throw new Error("Missing obsidian-vault command.");
+  const messages: Array<{ message: string; level: string | undefined }> = [];
+  await command.handler("", { ui: { notify(message: string, level?: string) { messages.push({ message, level }); } } });
+  if (messages.length !== 1) throw new Error(`Expected one status notification, received ${messages.length}.`);
+  return messages[0]!;
+}
+
+export async function vaultSnapshot(vaultRoot: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  async function visit(relativeDir: string): Promise<void> {
+    const absoluteDir = path.join(vaultRoot, ...relativeDir.split("/").filter(Boolean));
+    const entries = await readdir(absoluteDir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const relativePath = relativeDir ? `${relativeDir}/${entry.name}` : entry.name;
+      const absolutePath = path.join(absoluteDir, entry.name);
+      if (entry.isDirectory()) {
+        snapshot[`${relativePath}/`] = "<dir>";
+        await visit(relativePath);
+      } else if (entry.isFile()) {
+        snapshot[relativePath] = await readFile(absolutePath, "utf8");
+      } else {
+        snapshot[relativePath] = "<special>";
+      }
+    }
+  }
+  await visit("");
+  return snapshot;
+}
+
+export function expectNoSensitivePathLeak(value: unknown, sensitiveValues: string[]): void {
+  const text = typeof value === "string" ? value : stringifyDetails(value);
+  for (const sensitive of sensitiveValues.filter(Boolean)) {
+    if (text.includes(sensitive)) throw new Error(`Response leaked sensitive path ${sensitive}: ${text}`);
+  }
 }
 
 export function expectNoLocalPathLeak(value: unknown, vaultRoot: string): void {

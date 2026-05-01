@@ -25,7 +25,7 @@ describe("side-effect refusal", () => {
 
   it("returns safety_refusal for forbidden write operations", async () => {
     await withTempVault(async (vaultRoot) => {
-      for (const operation of ["overwrite", "replace_exact_text", "delete", "trash", "trash_note", "rename", "move", "open", "shell", "network", "scan", "command", "delete_folder", "trash_folder", "rename_folder", "move_folder", "mkdir", "create_directory"]) {
+      for (const operation of ["overwrite", "replace_exact_text", "delete", "trash", "trash_note", "restore_note", "copy_note", "rename", "move", "open", "shell", "network", "scan", "command", "delete_folder", "trash_folder", "rename_folder", "move_folder", "mkdir", "create_directory"]) {
         const result = await obsidianWrite({ operation, path: "Notes/Target.md", content: "replacement", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }
@@ -34,7 +34,7 @@ describe("side-effect refusal", () => {
 
   it("returns safety_refusal for forbidden edit operations", async () => {
     await withTempVault(async (vaultRoot) => {
-      for (const operation of ["create", "append", "overwrite", "delete", "trash", "trash_note", "rename", "move", "move_note", "open", "shell", "network", "scan", "command", "regex_replace", "fuzzy_replace", "semantic_replace"]) {
+      for (const operation of ["create", "append", "overwrite", "delete", "trash", "trash_note", "restore_note", "copy_note", "rename", "move", "move_note", "open", "shell", "network", "scan", "command", "regex_replace", "fuzzy_replace", "semantic_replace"]) {
         const result = await obsidianEdit({ operation, path: "Notes/Target.md", content: "replacement", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }
@@ -43,7 +43,7 @@ describe("side-effect refusal", () => {
 
   it("returns safety_refusal for forbidden manage operations", async () => {
     await withTempVault(async (vaultRoot) => {
-      for (const operation of ["create", "append", "overwrite", "delete", "remove", "unlink", "trash", "recycle", "recursive_delete", "bulk_delete", "wildcard_delete", "rename", "move", "copy", "open", "shell", "network", "scan", "command", "rewrite_links", "move_folder", "delete_folder"]) {
+      for (const operation of ["create", "append", "overwrite", "delete", "remove", "unlink", "trash", "recycle", "recursive_delete", "bulk_delete", "wildcard_delete", "rename", "move", "copy", "copy_note", "restore", "restore_note", "open", "shell", "network", "scan", "command", "rewrite_links", "move_folder", "delete_folder", "trash_folder"]) {
         const result = await obsidianManage({ operation, fromPath: "Notes/Source.md", toPath: "Notes/Target.md", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }

@@ -2,14 +2,14 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";
-import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
+import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusFromConfig, writeStatusFromConfig, type EditVaultStatus, type LoadConfigOptions, type ManageVaultStatus, type VaultConfig, type VaultStatus, type WriteVaultStatus } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
 import { obsidianEdit } from "./edit-engine.js";
 import { obsidianManage } from "./manage-engine.js";
 import { obsidianWrite } from "./write-engine.js";
-import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
+import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianCliHealth, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
 import type { ObsidianEditRequest } from "./edit-types.js";
 import type { ObsidianManageRequest } from "./manage-types.js";
 import type { ObsidianWriteRequest } from "./write-types.js";
@@ -213,6 +213,8 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       const editStatus = config ? await editStatusFromConfig(config) : undefined;
       const manageStatus = config ? await manageStatusFromConfig(config) : undefined;
       const health = await backend.checkHealth({ allowAutoLaunch: false });
+      const extraSensitivePaths = [health.cliPath, options.configPath].filter((value): value is string => Boolean(value));
+      const capabilities = buildCapabilityRows({ health, status, writeStatus, editStatus, manageStatus, hasInjectedBackend: Boolean(options.backend) });
       const lines = [
         `Obsidian Vault: ${health.available ? "CLI available" : "CLI unavailable"}`,
         status ? `Source: ${status.source}` : "Source: injected backend",
@@ -224,12 +226,54 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       if (writeStatus) lines.push(`Writes: ${writeStatus.writable ? "available" : "unavailable"}`);
       if (editStatus) lines.push(`obsidian_edit: ${editStatus.status}`);
       if (manageStatus) lines.push(`obsidian_manage: ${manageStatus.status}`);
-      const extraSensitivePaths = [health.cliPath];
+      lines.push("", "Capabilities:");
+      for (const capability of capabilities) lines.push(`- ${capability.name}: ${capability.state} — ${redactStatusPath(capability.summary, config, extraSensitivePaths)}`);
       for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? []), ...(manageStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
       for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? []), ...(manageStatus?.warnings ?? [])]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
-      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) && (editStatus?.status !== "degraded") && (manageStatus?.status !== "degraded") ? "info" : "warning");
+      const allAvailable = capabilities.every((capability) => capability.state === "available");
+      ctx.ui.notify(lines.join("\n"), allAvailable ? "info" : "warning");
     },
   });
+}
+
+type CapabilityState = "available" | "degraded" | "unavailable";
+interface CapabilityRow {
+  name: "retrieve" | "write" | "edit" | "manage";
+  state: CapabilityState;
+  summary: string;
+}
+
+function buildCapabilityRows(input: {
+  health: ObsidianCliHealth;
+  status: VaultStatus | undefined;
+  writeStatus: WriteVaultStatus | undefined;
+  editStatus: EditVaultStatus | undefined;
+  manageStatus: ManageVaultStatus | undefined;
+  hasInjectedBackend: boolean;
+}): CapabilityRow[] {
+  const retrievalConfigured = input.hasInjectedBackend || Boolean(input.status?.vaultRoot || input.status?.vaultTarget || input.health.vaultTarget);
+  const retrieveState: CapabilityState = !retrievalConfigured || !input.health.available ? "unavailable" : input.health.warnings.length > 0 ? "degraded" : "available";
+  const retrieveSummary = retrieveState === "available"
+    ? "read-only retrieval health check passed"
+    : retrieveState === "degraded"
+      ? "read-only retrieval is reachable with warnings"
+      : "read-only retrieval is not currently reachable or configured";
+
+  const writeState: CapabilityState = input.writeStatus?.writable ? "available" : input.writeStatus?.configured ? "degraded" : "unavailable";
+  const writeSummary = writeState === "available" ? "local vault path configured for create, append, and create_folder" : writeState === "degraded" ? "local vault path is configured but write health is degraded" : "local vault path is required for obsidian_write";
+
+  return [
+    { name: "retrieve", state: retrieveState, summary: retrieveSummary },
+    { name: "write", state: writeState, summary: writeSummary },
+    { name: "edit", state: input.editStatus?.status ?? "unavailable", summary: capabilitySummary("obsidian_edit", input.editStatus?.status ?? "unavailable") },
+    { name: "manage", state: input.manageStatus?.status ?? "unavailable", summary: capabilitySummary("obsidian_manage", input.manageStatus?.status ?? "unavailable") },
+  ];
+}
+
+function capabilitySummary(surface: "obsidian_edit" | "obsidian_manage", state: CapabilityState): string {
+  if (state === "available") return `local vault path configured for ${surface}`;
+  if (state === "degraded") return `local vault path is configured but ${surface} health is degraded`;
+  return `local vault path is required for ${surface}`;
 }
 
 async function backendFromOptions(options: RegisterObsidianVaultOptions): Promise<ObsidianCliBackend> {

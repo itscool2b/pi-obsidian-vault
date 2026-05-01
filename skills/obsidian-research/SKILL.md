@@ -23,7 +23,8 @@ Use `obsidian_retrieve` for all Obsidian vault retrieval. Use `obsidian_write` o
    - `mode: "context"`
    - `selected: [{ "path": "...", "title": "..." }]`
 4. Use returned context excerpts before making another retrieval call.
-5. Use `mode: "graph"` or `mode: "project"` for bounded relationship/project summaries.
+5. Only after retrieval/context confirms the user's intent, route explicit mutations to `obsidian_write`, `obsidian_edit`, or `obsidian_manage` with user-supplied safe vault-relative paths; never infer mutation targets from search results alone.
+6. Use `mode: "graph"` or `mode: "project"` for bounded relationship/project summaries.
 
 ## Safety rules
 

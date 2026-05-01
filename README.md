@@ -18,7 +18,15 @@ The extension registers four Pi-facing tools:
 
 It also registers the existing status command:
 
-- `/obsidian-vault` — reports retrieval CLI/vault configuration health, local write availability, `obsidian_edit` availability, and `obsidian_manage` availability as available, unavailable, or degraded without exposing the local vault root.
+- `/obsidian-vault` — reports retrieval CLI/vault configuration health plus a compact retrieve/write/edit/manage capability table as available, unavailable, or degraded without exposing the local vault root.
+
+## Recommended agent workflow
+
+1. Use `obsidian_retrieve` first to retrieve candidates with `mode: "search"`, `mode: "graph"`, or a bounded `mode: "project"` request.
+2. Read `agentGuidance`; when it recommends selected context, call `obsidian_retrieve` again with `mode: "context"` and only the exact `selectedRef` paths returned by the previous response.
+3. Answer from retrieved context when possible. Do not request a vault dump or infer a mutation target from a topic query.
+4. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides an explicit safe vault-relative path for the requested create/append/folder/edit/move/trash operation.
+5. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`.
 
 Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash intent and never performs side effects. `obsidian_write` refuses overwrite, delete, trash, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note` and `trash_note`, including permanent delete, folder delete, recursive delete, wildcard delete, bulk delete, non-Markdown delete, folder moves, overwrite, copy, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
@@ -290,7 +298,7 @@ Trash to an explicit safe folder:
 
 `trash_note` is recoverable move-to-trash behavior inside the vault, not permanent deletion. Missing sources return deterministic `not_found` / `SOURCE_NOT_FOUND`; non-Markdown source paths return deterministic `validation_error` / `SOURCE_NOT_MARKDOWN`; source folders return deterministic `safety_refusal` / `SOURCE_IS_FOLDER`; unsafe trash folders return deterministic `safety_refusal` / `UNSAFE_TRASH_FOLDER`; existing final trash paths return deterministic `conflict` / `TRASH_TARGET_EXISTS` with no overwrite, suffixing, or auto-rename; trash-folder files return deterministic `conflict` / `TRASH_FOLDER_NOT_FOLDER`.
 
-## Safety model
+## Safety model and intentionally unsupported operations
 
 - `obsidian_retrieve` is read-only. It does not write, append, rename, move, trash, delete, open UI, run shell commands, or mutate notes.
 - Obsidian CLI is the retrieval discovery and metadata backend.

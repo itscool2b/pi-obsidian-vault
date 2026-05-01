@@ -202,6 +202,27 @@ export class FakeObsidianCliBackend implements ObsidianCliBackend {
   }
 }
 
+export const READ_ONLY_FAKE_CLI_METHODS = new Set([
+  "checkHealth",
+  "search",
+  "searchContext",
+  "files",
+  "folders",
+  "file",
+  "read",
+  "outline",
+  "aliases",
+  "tags",
+  "properties",
+  "links",
+  "backlinks",
+  "recents",
+]);
+
+export function unexpectedFakeCliSideEffectCalls(backend: FakeObsidianCliBackend): Array<{ method: string; input?: unknown }> {
+  return backend.calls.filter((call) => !READ_ONLY_FAKE_CLI_METHODS.has(call.method));
+}
+
 export function seededFakeCli(): FakeObsidianCliBackend {
   const cli = new FakeObsidianCliBackend();
   cli.addNote({

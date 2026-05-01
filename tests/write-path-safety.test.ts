@@ -8,6 +8,7 @@ import { stringifyDetails, withTempVault } from "./write-test-utils.js";
 const unsafePaths = [
   "/tmp/outside.md",
   "C:\\Users\\me\\outside.md",
+  "\\\\server\\share\\outside.md",
   "../outside.md",
   "Folder/%2e%2e/outside.md",
   "Folder/%25252e%25252e/outside.md",
@@ -15,11 +16,16 @@ const unsafePaths = [
   "Notes/file.txt",
   ".hidden/Note.md",
   "Notes/./Bad.md",
+  "",
+  "   ",
+  ".",
+  "@",
 ];
 
 const unsafeFolderPaths = [
   "/tmp/outside",
   "C:\\Users\\me\\outside",
+  "\\\\server\\share\\outside",
   "C:relative",
   "../outside",
   "Folder/%2e%2e/outside",

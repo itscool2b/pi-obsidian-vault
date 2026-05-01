@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { registerObsidianVault } from "../src/index.js";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
-import { seededFakeCli } from "./fake-obsidian-cli.js";
+import { seededFakeCli, unexpectedFakeCliSideEffectCalls } from "./fake-obsidian-cli.js";
+import { seedNote, vaultSnapshot, withTempVault } from "./write-test-utils.js";
 
 function fakePi() {
   return {
@@ -52,6 +53,18 @@ describe("obsidian_retrieve contract", () => {
     expect(replace.warnings.join("\n")).toMatch(/read-only/i);
     const folder = await obsidianRetrieve(seededFakeCli(), { query: "create folder Projects/New Area", mode: "search" });
     expect(folder.warnings.join("\n")).toMatch(/read-only/i);
+  });
+
+  it("does not mutate a local temp vault even for mutation-like requests", async () => {
+    await withTempVault(async (vaultRoot) => {
+      await seedNote(vaultRoot, "Notes/Existing.md", "# Existing\n");
+      const before = await vaultSnapshot(vaultRoot);
+      const backend = seededFakeCli();
+      const result = await obsidianRetrieve(backend, { query: "create append edit move trash delete Notes/Existing", mode: "search", budget: "tiny" });
+      expect(result.warnings.join("\n")).toMatch(/read-only/i);
+      expect(await vaultSnapshot(vaultRoot)).toEqual(before);
+      expect(unexpectedFakeCliSideEffectCalls(backend)).toEqual([]);
+    });
   });
 
   it("returns setup guidance from obsidian_retrieve itself when no vault is configured", async () => {

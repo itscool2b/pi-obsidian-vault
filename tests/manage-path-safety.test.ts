@@ -8,6 +8,7 @@ import { pathExists, seedFolder, seedNote, stringifyDetails, withTempVault } fro
 const unsafeSourcePaths = [
   "/tmp/outside.md",
   "C:\\Users\\me\\outside.md",
+  "\\\\server\\share\\outside.md",
   "../outside.md",
   "Folder/%2e%2e/outside.md",
   "Folder/%25252e%25252e/outside.md",
@@ -25,6 +26,7 @@ const unsafeSourcePaths = [
 const unsafeDestinationPaths = [
   "/tmp/outside.md",
   "C:\\Users\\me\\outside.md",
+  "\\\\server\\share\\outside.md",
   "../outside.md",
   "Folder/%2e%2e/outside.md",
   "Folder/%25252e%25252e/outside.md",

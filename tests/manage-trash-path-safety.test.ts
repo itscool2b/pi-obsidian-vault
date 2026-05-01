@@ -5,6 +5,7 @@ import { pathExists, seedNote, stringifyDetails, withTempVault } from "./write-t
 const unsafeSourcePaths = [
   "/tmp/outside.md",
   "C:\\Users\\me\\outside.md",
+  "\\\\server\\share\\outside.md",
   "../outside.md",
   "Folder/%2e%2e/outside.md",
   "Folder/%25252e%25252e/outside.md",
@@ -22,6 +23,7 @@ const unsafeSourcePaths = [
 const unsafeTrashFolders = [
   "/tmp/trash",
   "C:\\Users\\me\\Trash",
+  "\\\\server\\share\\Trash",
   "../Trash",
   "Folder/%2e%2e/Trash",
   "Folder/%25252e%25252e/Trash",

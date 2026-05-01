@@ -14,7 +14,7 @@ async function sourceFiles(dir: string): Promise<string[]> {
 }
 
 describe("process safety", () => {
-  it("centralizes process spawning in the Obsidian CLI adapter and never uses shell/network APIs", async () => {
+  it("centralizes process spawning in the Obsidian CLI adapter and never uses shell/network/permanent-delete APIs", async () => {
     const files = await sourceFiles(path.join(process.cwd(), "src"));
     const intentionalWriteFiles = new Set(["src/vault-writer.ts", "src/write-engine.ts", "src/write-guidance.ts", "src/write-types.ts", "src/vault-editor.ts", "src/edit-engine.ts", "src/edit-guidance.ts", "src/edit-types.ts", "src/markdown-section-editor.ts", "src/frontmatter-editor.ts", "src/exact-text-editor.ts", "src/vault-manager.ts", "src/manage-engine.ts", "src/manage-guidance.ts", "src/manage-types.ts", "src/target-lock.ts"]);
     expect(files.map((file) => path.relative(process.cwd(), file))).toContain("src/agent-guidance.ts");
@@ -31,8 +31,12 @@ describe("process safety", () => {
       }
       if (relative === "src/vault-manager.ts") {
         expect(text).not.toMatch(/\b(unlink|rm|rmdir|remove)\s*\(/);
-        expect(text).not.toMatch(/node:fs\/promises[\s\S]*\b(unlink|rm|rmdir)\b/);
-      } else expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir)\s*\(/);
+        expect(text).not.toMatch(/node:fs\/promises[\s\S]*\b(unlink|rm|rmdir|remove)\b/);
+      } else expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir|remove)\s*\(/);
+      if (relative.startsWith("src/") && relative !== "src/obsidian-cli.ts") {
+        expect(text).not.toMatch(/\b(xdg-open|gtk-launch)\b/);
+        expect(text).not.toMatch(/command:\s*["']open["']/);
+      }
     }
   });
 
