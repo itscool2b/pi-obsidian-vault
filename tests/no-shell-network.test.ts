@@ -29,8 +29,10 @@ describe("process safety", () => {
       if (!intentionalWriteFiles.has(relative)) {
         expect(text).not.toMatch(/\b(open|create|append|prepend|rename|delete|move)\s*\(/);
       }
-      if (relative === "src/vault-manager.ts") expect(text).not.toMatch(/\b(unlink|rm|rmdir)\s*\(/);
-      else expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir)\s*\(/);
+      if (relative === "src/vault-manager.ts") {
+        expect(text).not.toMatch(/\b(unlink|rm|rmdir|remove)\s*\(/);
+        expect(text).not.toMatch(/node:fs\/promises[\s\S]*\b(unlink|rm|rmdir)\b/);
+      } else expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir)\s*\(/);
     }
   });
 

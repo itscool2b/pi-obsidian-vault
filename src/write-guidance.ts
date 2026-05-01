@@ -1,13 +1,13 @@
 import type { ObsidianWriteError, ObsidianWriteNextAction, ObsidianWriteOperation, ObsidianWriteOutput, ObsidianWriteStatus, WriteContentSummary, WritePreview, WriteTargetSummary } from "./write-types.js";
 
 const PREVIEW_CHARS = 500;
-const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "truncate", "prepend", "delete", "remove", "rename", "move", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "delete_folder", "remove_folder", "rename_folder", "move_folder", "rmdir"]);
+const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "truncate", "prepend", "delete", "remove", "unlink", "erase", "discard", "trash", "trash_note", "recycle", "rename", "move", "move_note", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "delete_folder", "remove_folder", "trash_folder", "rename_folder", "move_folder", "rmdir"]);
 
 export function normalizeOperation(value: string | undefined): { operation?: ObsidianWriteOperation | undefined; requested?: string | undefined; forbidden: boolean } {
   const requested = value?.trim().toLowerCase();
   if (!requested) return { forbidden: false };
   if (requested === "create" || requested === "append" || requested === "create_folder") return { operation: requested, requested, forbidden: false };
-  const forbidden = FORBIDDEN_OPERATIONS.has(requested) || /overwrite|replace|truncate|prepend|delete|remove|rename|move|open|launch|shell|bash|exec|command|curl|fetch|network|scan|discover|rmdir/.test(requested);
+  const forbidden = FORBIDDEN_OPERATIONS.has(requested) || /overwrite|replace|truncate|prepend|delete|remove|unlink|erase|discard|trash|recycle|rename|move|open|launch|shell|bash|exec|command|curl|fetch|network|scan|discover|rmdir/.test(requested);
   return { requested, forbidden };
 }
 

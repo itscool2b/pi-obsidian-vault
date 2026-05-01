@@ -83,24 +83,31 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/newText/);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
-    expect(surfaceText).toMatch(/create, full-note overwrite, delete, rename, move/i);
+    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, rename, move/i);
     expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
   });
 
-  it("publishes a strict obsidian_manage schema for move_note only", () => {
+  it("publishes a strict obsidian_manage schema for move_note and trash_note only", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     const schema = pi.tools.get("obsidian_manage").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "toPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "path", "toPath", "trashFolder"]);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md" })).toBe(true);
+    expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md", trashFolder: "Archive/Trash", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", content: "x" })).toBe(false);
+    expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md", recursive: true })).toBe(false);
     const surfaceText = [pi.tools.get("obsidian_manage").description, pi.tools.get("obsidian_manage").promptSnippet, ...(pi.tools.get("obsidian_manage").promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/move_note/);
+    expect(surfaceText).toMatch(/trash_note/);
     expect(surfaceText).toMatch(/fromPath/);
     expect(surfaceText).toMatch(/toPath/);
+    expect(surfaceText).toMatch(/trashFolder/);
+    expect(surfaceText).toMatch(/_Trash/);
+    expect(surfaceText).toMatch(/TRASH_TARGET_EXISTS/);
     expect(surfaceText).toMatch(/PARENT_MISSING/);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/overwrite/i);

@@ -46,6 +46,15 @@ export async function expectFolderMissing(vaultRoot: string, relativePath: strin
   if (await pathExists(vaultRoot, relativePath)) throw new Error(`Expected ${relativePath} to be missing.`);
 }
 
+export async function expectPathMissing(vaultRoot: string, relativePath: string): Promise<void> {
+  if (await pathExists(vaultRoot, relativePath)) throw new Error(`Expected ${relativePath} to be missing.`);
+}
+
+export async function expectTrashTarget(vaultRoot: string, relativePath: string, expectedContent: string): Promise<void> {
+  const actual = await readNote(vaultRoot, relativePath);
+  if (actual !== expectedContent) throw new Error(`Expected trash target ${relativePath} to contain original note content.`);
+}
+
 export async function expectNoteUnchanged(vaultRoot: string, relativePath: string, expectedContent: string): Promise<void> {
   const actual = await readNote(vaultRoot, relativePath);
   if (actual !== expectedContent) throw new Error(`Expected ${relativePath} to remain unchanged.`);

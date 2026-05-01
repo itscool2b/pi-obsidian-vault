@@ -5,7 +5,7 @@ A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writ
 - Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only.
 - Writing uses explicit vault-relative paths under a configured local vault path and supports only Markdown create/append, folder creation, and dry-run preview.
 - Structured editing uses explicit vault-relative Markdown paths to existing notes and supports only section replacement/insertion, top-of-file frontmatter property updates/removals, and literal exact-text replacement.
-- Note management uses explicit vault-relative Markdown source/destination paths and supports only dry-run-first single-note `move_note` moves/renames.
+- Note management uses explicit vault-relative Markdown paths and supports only dry-run-first single-note `move_note` moves/renames and recoverable `trash_note` moves to a vault-internal trash folder.
 
 ## Public tool surface
 
@@ -14,13 +14,13 @@ The extension registers four Pi-facing tools:
 - `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, and project/topic retrieval. Strictly read-only.
 - `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
-- `obsidian_manage` — safe single-note move/rename management via `move_note` only. Dry-run preview is the default.
+- `obsidian_manage` — safe single-note move/rename management via `move_note` and recoverable single-note trash via `trash_note`. Dry-run preview is the default.
 
 It also registers the existing status command:
 
 - `/obsidian-vault` — reports retrieval CLI/vault configuration health, local write availability, `obsidian_edit` availability, and `obsidian_manage` availability as available, unavailable, or degraded without exposing the local vault root.
 
-Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move intent and never performs side effects. `obsidian_write` refuses overwrite, delete, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, including folder moves, overwrite, delete, copy, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
+Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash intent and never performs side effects. `obsidian_write` refuses overwrite, delete, trash, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note` and `trash_note`, including permanent delete, folder delete, recursive delete, wildcard delete, bulk delete, non-Markdown delete, folder moves, overwrite, copy, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
 ## First-time setup
 
@@ -242,9 +242,9 @@ Section headings must match exactly after Markdown heading normalization. Duplic
 
 ## Manage usage examples
 
-Supported `obsidian_manage` top-level request fields are exactly: `operation`, `fromPath`, `toPath`, and `dryRun`.
+Supported `obsidian_manage` top-level request fields are exactly: `operation`, `fromPath`, `toPath`, `path`, `trashFolder`, and `dryRun`.
 
-The only supported operation is `move_note`. `dryRun` defaults to `true`, so the first call previews without moving anything.
+The supported operations are exactly `move_note` and `trash_note`. `dryRun` defaults to `true`, so the first call previews without moving anything.
 
 Dry-run note move preview:
 
@@ -268,9 +268,31 @@ Rename within the same folder:
 
 `move_note` moves or renames exactly one Markdown file. It does not move folders, overwrite destinations, delete, copy, rewrite links, create parent folders, open Obsidian, scan or discover the vault, run shell/network calls, or execute arbitrary CLI commands.
 
+Dry-run note trash preview with the default `_Trash` folder:
+
+```json
+{ "operation": "trash_note", "path": "Projects/Plan.md", "dryRun": true }
+```
+
+Committed recoverable trash after confirmation:
+
+```json
+{ "operation": "trash_note", "path": "Projects/Plan.md", "dryRun": false }
+```
+
+Trash to an explicit safe folder:
+
+```json
+{ "operation": "trash_note", "path": "Projects/Plan.md", "trashFolder": "Archive/Trash", "dryRun": false }
+```
+
+`trash_note` requires `path` to be an explicit safe vault-relative Markdown note path. Optional `trashFolder` must be an explicit safe vault-relative folder path; when omitted it defaults to `_Trash`. Dry-run previews do not move notes or create folders. A committed request creates the safe trash folder if needed and moves exactly one Markdown note to `trashFolder/<source filename>` while preserving note content.
+
+`trash_note` is recoverable move-to-trash behavior inside the vault, not permanent deletion. Missing sources return deterministic `not_found` / `SOURCE_NOT_FOUND`; non-Markdown source paths return deterministic `validation_error` / `SOURCE_NOT_MARKDOWN`; source folders return deterministic `safety_refusal` / `SOURCE_IS_FOLDER`; unsafe trash folders return deterministic `safety_refusal` / `UNSAFE_TRASH_FOLDER`; existing final trash paths return deterministic `conflict` / `TRASH_TARGET_EXISTS` with no overwrite, suffixing, or auto-rename; trash-folder files return deterministic `conflict` / `TRASH_FOLDER_NOT_FOLDER`.
+
 ## Safety model
 
-- `obsidian_retrieve` is read-only. It does not write, append, rename, move, delete, open UI, run shell commands, or mutate notes.
+- `obsidian_retrieve` is read-only. It does not write, append, rename, move, trash, delete, open UI, run shell commands, or mutate notes.
 - Obsidian CLI is the retrieval discovery and metadata backend.
 - No filesystem scanning is used for retrieval discovery.
 - Note content is loaded only for selected candidates in `context` mode.
@@ -280,13 +302,14 @@ Rename within the same folder:
 - `obsidian_write` is separate from retrieval and only supports Markdown create/append, folder create_folder, and dry-run preview.
 - `create_folder` creates only explicit safe vault-relative folders, rejects supplied content with `CONTENT_NOT_ALLOWED`, refuses hidden/.obsidian/traversal/absolute/extension-looking targets, and never creates or modifies Markdown files.
 - `obsidian_edit` is separate from retrieval and writing and only supports structured edits to existing Markdown notes.
-- `obsidian_manage` is separate from retrieval, writing, and editing and only supports `move_note` for exactly one existing Markdown note.
+- `obsidian_manage` is separate from retrieval, writing, and editing and only supports `move_note` and `trash_note` for exactly one existing Markdown note.
 - `replace_exact_text` replaces only one exact literal span inside an existing note; it does not support regex, fuzzy matching, replace-all, occurrence selection, inferred target text, or full-note replacement.
 - Write/edit/manage note paths must be explicit vault-relative Markdown paths. Folder creation paths must be explicit vault-relative non-root folder paths. Absolute paths, Windows absolute paths, `.`, `..`, hidden paths, `.obsidian`, non-Markdown note targets, extension-looking folder targets, and encoded traversal are refused.
 - `obsidian_edit` never creates notes. Missing target notes return deterministic `not_found` / `TARGET_MISSING` results without partial mutation.
 - `obsidian_manage move_note` never creates parent folders, overwrites destinations, moves folders, deletes, copies, rewrites links, scans, discovers, opens UI, shells out, or uses network calls. Missing destination parents return deterministic `not_found` / `PARENT_MISSING` results without partial mutation.
-- Committed writes, folder creations, edits, and manage moves are serialized per normalized vault-relative target path. `obsidian_manage move_note` locks both source and destination paths and shares the same target-lock namespace as `obsidian_write` and `obsidian_edit`; different safe target paths are not forced through a global queue.
-- Write/edit/manage responses expose safe vault-relative paths only, not the configured vault root or absolute source/destination/target paths.
+- `obsidian_manage trash_note` never permanently deletes, empties trash, moves folders, trashes non-Markdown files, handles recursive/wildcard/bulk paths, overwrites trash targets, auto-renames collisions, copies, rewrites links, scans, discovers, opens UI, shells out, or uses network calls. It creates only the explicit safe trash folder when committed and needed.
+- Committed writes, folder creations, edits, manage moves, and manage trash operations are serialized per normalized vault-relative target path. `obsidian_manage move_note` locks both source and destination paths; `obsidian_manage trash_note` locks both source and final trash paths. Both share the same target-lock namespace as `obsidian_write` and `obsidian_edit`; different safe target paths are not forced through a global queue.
+- Write/edit/manage responses expose safe vault-relative paths only, not the configured vault root or absolute source/destination/trash/target paths.
 
 ## Development
 
@@ -296,11 +319,13 @@ npm test
 npm run check
 ```
 
-Focused write/edit checks:
+Focused write/edit/manage checks:
 
 ```bash
 npm test -- write-contract write-filesystem write-dry-run write-folder write-path-safety write-concurrency
 npm test -- edit-contract edit-dry-run edit-section edit-frontmatter edit-exact-text edit-path-safety edit-concurrency edit-tool-boundaries
+npm test -- manage-contract manage-dry-run manage-filesystem manage-path-safety manage-concurrency manage-tool-boundaries
+npm test -- manage-trash-dry-run manage-trash-filesystem manage-trash-path-safety manage-trash-concurrency
 ```
 
 Real-vault evaluation is opt-in:
