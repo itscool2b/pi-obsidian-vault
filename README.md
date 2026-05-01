@@ -3,7 +3,7 @@
 A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writing, and safe structured editing.
 
 - Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only.
-- Writing uses explicit vault-relative Markdown paths under a configured local vault path and supports only create, append, and dry-run preview.
+- Writing uses explicit vault-relative paths under a configured local vault path and supports only Markdown create/append, folder creation, and dry-run preview.
 - Structured editing uses explicit vault-relative Markdown paths to existing notes and supports only section replacement/insertion, top-of-file frontmatter property updates/removals, and literal exact-text replacement.
 
 ## Public tool surface
@@ -11,14 +11,14 @@ A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writ
 The extension registers three Pi-facing tools:
 
 - `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, and project/topic retrieval. Strictly read-only.
-- `obsidian_write` — safe explicit-path Markdown note creation and append-only updates. Dry-run preview is the default.
+- `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
 
 It also registers the existing status command:
 
 - `/obsidian-vault` — reports retrieval CLI/vault configuration health, local write availability, and `obsidian_edit` availability as available, unavailable, or degraded without exposing the local vault root.
 
-Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open intent and never performs side effects. `obsidian_write` refuses overwrite, delete, rename, move, open UI, shell, network, scan, structured edit, and arbitrary command requests. `obsidian_edit` refuses note creation, full-note overwrite, delete, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests.
+Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open intent and never performs side effects. `obsidian_write` refuses overwrite, delete, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests.
 
 ## First-time setup
 
@@ -133,7 +133,7 @@ Project retrieval:
 
 Supported `obsidian_write` top-level request fields are exactly: `operation`, `path`, `content`, and `dryRun`.
 
-Supported operations are `create` and `append`. `dryRun` defaults to `true`, so the first call previews without changing the vault.
+Supported operations are `create`, `append`, and `create_folder`. `dryRun` defaults to `true`, so the first call previews without changing the vault.
 
 Dry-run create preview:
 
@@ -152,6 +152,20 @@ Append exactly supplied Markdown:
 ```json
 { "operation": "append", "path": "Projects/New Idea.md", "content": "\n## Follow-up\nMore notes.", "dryRun": false }
 ```
+
+Dry-run folder creation preview:
+
+```json
+{ "operation": "create_folder", "path": "Projects/New Area", "dryRun": true }
+```
+
+Committed folder creation after confirmation:
+
+```json
+{ "operation": "create_folder", "path": "Projects/New Area", "dryRun": false }
+```
+
+`create_folder` requires an explicit safe vault-relative folder path, creates missing safe parent folders only when committed, rejects `content` with `validation_error` / `CONTENT_NOT_ALLOWED`, and never creates or modifies Markdown files. Existing folders return deterministic conflict results. File-looking folder targets such as `Folder.md` or `Folder.txt`, hidden folders, `.obsidian`, absolute paths, and traversal are refused.
 
 `create` never overwrites existing notes. `append` never creates missing notes. Forbidden or unsupported operations return `safety_refusal`.
 
@@ -233,12 +247,13 @@ Section headings must match exactly after Markdown heading normalization. Duplic
 - Retrieval responses are capped by budget and report omissions/truncation.
 - Broad vault/folder/multi-note dump requests return candidates and bounded summaries, not full note bodies.
 - CLI invocation uses argv arrays with `shell: false`.
-- `obsidian_write` is separate from retrieval and only supports create, append, and dry-run preview.
+- `obsidian_write` is separate from retrieval and only supports Markdown create/append, folder create_folder, and dry-run preview.
+- `create_folder` creates only explicit safe vault-relative folders, rejects supplied content with `CONTENT_NOT_ALLOWED`, refuses hidden/.obsidian/traversal/absolute/extension-looking targets, and never creates or modifies Markdown files.
 - `obsidian_edit` is separate from retrieval and writing and only supports structured edits to existing Markdown notes.
 - `replace_exact_text` replaces only one exact literal span inside an existing note; it does not support regex, fuzzy matching, replace-all, occurrence selection, inferred target text, or full-note replacement.
-- Write/edit paths must be explicit vault-relative Markdown paths. Absolute paths, Windows absolute paths, `.`, `..`, hidden paths, `.obsidian`, non-Markdown targets, and encoded traversal are refused.
+- Write/edit note paths must be explicit vault-relative Markdown paths. Folder creation paths must be explicit vault-relative non-root folder paths. Absolute paths, Windows absolute paths, `.`, `..`, hidden paths, `.obsidian`, non-Markdown note targets, extension-looking folder targets, and encoded traversal are refused.
 - `obsidian_edit` never creates notes. Missing target notes return deterministic `not_found` / `TARGET_MISSING` results without partial mutation.
-- Committed writes and edits are serialized per normalized vault-relative target path, including mixed `obsidian_write` + `obsidian_edit` mutations to the same note. Different safe target paths are not forced through a global queue.
+- Committed writes, folder creations, and edits are serialized per normalized vault-relative target path, including mixed `obsidian_write` + `obsidian_edit` mutations to the same note. Different safe target paths are not forced through a global queue.
 - Write/edit responses expose safe vault-relative paths only, not the configured vault root or absolute target paths.
 
 ## Development
@@ -252,7 +267,7 @@ npm run check
 Focused write/edit checks:
 
 ```bash
-npm test -- write-contract write-filesystem write-dry-run write-path-safety write-concurrency
+npm test -- write-contract write-filesystem write-dry-run write-folder write-path-safety write-concurrency
 npm test -- edit-contract edit-dry-run edit-section edit-frontmatter edit-exact-text edit-path-safety edit-concurrency edit-tool-boundaries
 ```
 

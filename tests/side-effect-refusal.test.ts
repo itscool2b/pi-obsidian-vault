@@ -12,13 +12,15 @@ describe("side-effect refusal", () => {
     expect(result.warnings.join("\n")).toMatch(/read-only/i);
     const replaceIntent = await obsidianRetrieve(seededFakeCli(), { query: "replace exact text in integrated gradients", mode: "search" });
     expect(replaceIntent.warnings.join("\n")).toMatch(/read-only/i);
-    expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move"]));
-    expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move"]));
+    const folderIntent = await obsidianRetrieve(seededFakeCli(), { query: "create folder Projects/New Area", mode: "search" });
+    expect(folderIntent.warnings.join("\n")).toMatch(/read-only/i);
+    expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move", "create_folder"]));
+    expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "rename", "move", "create_folder"]));
   });
 
   it("returns safety_refusal for forbidden write operations", async () => {
     await withTempVault(async (vaultRoot) => {
-      for (const operation of ["overwrite", "replace_exact_text", "delete", "rename", "move", "open", "shell", "network", "scan", "command"]) {
+      for (const operation of ["overwrite", "replace_exact_text", "delete", "rename", "move", "open", "shell", "network", "scan", "command", "delete_folder", "rename_folder", "move_folder", "mkdir", "create_directory"]) {
         const result = await obsidianWrite({ operation, path: "Notes/Target.md", content: "replacement", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }

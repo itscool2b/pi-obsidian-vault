@@ -30,7 +30,7 @@ describe("obsidian_write dry-run previews", () => {
       expect(result.dryRun).toBe(true);
       expect(result.preview?.contentChars).toBe(800);
       expect(result.preview?.previewTruncated).toBe(true);
-      expect((result.preview?.contentPreview.length ?? 0)).toBeLessThan(800);
+      expect(result.preview?.contentPreview?.length ?? 0).toBeLessThan(800);
       expect(result.nextActions.map((action) => action.action)).toContain("confirm_preview");
       await expect(access(absoluteNotePath(vaultRoot, "Preview/Default.md"))).rejects.toThrow();
     });

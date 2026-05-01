@@ -15,8 +15,10 @@ describe("Obsidian tool boundaries", () => {
     expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "append", "edit", "delete", "rename", "move", "open"]));
   });
 
-  it("keeps obsidian_write limited to create and append", async () => {
+  it("keeps obsidian_write limited to create, append, and create_folder", async () => {
     await withTempVault(async (vaultRoot) => {
+      const folder = await obsidianWrite({ operation: "create_folder", path: "Folders/New", dryRun: true }, { vaultRoot });
+      expect(folder).toMatchObject({ status: "preview", operation: "create_folder", committed: false });
       for (const operation of ["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text", "overwrite", "delete", "rename", "move", "open"]) {
         const result = await obsidianWrite({ operation, path: "Notes/Target.md", content: "x", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
@@ -27,7 +29,7 @@ describe("Obsidian tool boundaries", () => {
   it("keeps obsidian_edit from creating notes or accepting create/append/write operations", async () => {
     await withTempVault(async (vaultRoot) => {
       await seedNote(vaultRoot, "Notes/Existing.md", "# Existing\n");
-      for (const operation of ["create", "append", "write", "overwrite", "delete", "rename", "move", "open", "shell", "network", "scan", "regex_replace", "fuzzy_replace", "semantic_replace"]) {
+      for (const operation of ["create", "append", "create_folder", "write", "overwrite", "delete", "rename", "move", "open", "shell", "network", "scan", "regex_replace", "fuzzy_replace", "semantic_replace"]) {
         const result = await obsidianEdit({ operation, path: "Notes/Existing.md", content: "x", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }

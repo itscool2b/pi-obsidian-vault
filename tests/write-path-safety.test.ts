@@ -17,6 +17,25 @@ const unsafePaths = [
   "Notes/./Bad.md",
 ];
 
+const unsafeFolderPaths = [
+  "/tmp/outside",
+  "C:\\Users\\me\\outside",
+  "C:relative",
+  "../outside",
+  "Folder/%2e%2e/outside",
+  "Folder/%25252e%25252e/outside",
+  ".obsidian/plugins",
+  ".hidden/Folder",
+  "Notes/./Bad",
+  "Projects/Folder.md",
+  "Projects/Folder.txt",
+  "Projects/Folder.json",
+  "",
+  "   ",
+  ".",
+  "@",
+];
+
 describe("obsidian_write path safety", () => {
   it("rejects unsafe paths without leaking vaultRoot or absolute target paths", async () => {
     await withTempVault(async (vaultRoot) => {
@@ -31,6 +50,19 @@ describe("obsidian_write path safety", () => {
     });
   });
 
+  it("rejects unsafe create_folder paths without leaking vaultRoot or absolute target paths", async () => {
+    await withTempVault(async (vaultRoot) => {
+      for (const targetPath of unsafeFolderPaths) {
+        const result = await obsidianWrite({ operation: "create_folder", path: targetPath, dryRun: false }, { vaultRoot });
+        expect(["safety_refusal", "validation_error"]).toContain(result.status);
+        expect(result.committed).toBe(false);
+        const text = stringifyDetails(result);
+        expect(text).not.toContain(vaultRoot);
+        expect(text).not.toContain(path.join(vaultRoot, "Projects"));
+      }
+    });
+  });
+
   it("rejects symlink containment escapes", async () => {
     await withTempVault(async (vaultRoot) => {
       const outside = await mkdtemp(path.join(os.tmpdir(), "pi-obsidian-outside-"));
@@ -38,7 +70,9 @@ describe("obsidian_write path safety", () => {
         await symlink(outside, path.join(vaultRoot, "Linked"), "dir");
         const result = await obsidianWrite({ operation: "create", path: "Linked/Escape.md", content: "x", dryRun: false }, { vaultRoot });
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { code: "UNSAFE_PATH" } });
-        const text = stringifyDetails(result);
+        const folderResult = await obsidianWrite({ operation: "create_folder", path: "Linked/Escape", dryRun: false }, { vaultRoot });
+        expect(folderResult).toMatchObject({ status: "safety_refusal", committed: false, error: { code: "UNSAFE_PATH" } });
+        const text = stringifyDetails([result, folderResult]);
         expect(text).not.toContain(vaultRoot);
         expect(text).not.toContain(outside);
       } finally {

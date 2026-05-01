@@ -50,6 +50,8 @@ describe("obsidian_retrieve contract", () => {
     expect(result.warnings.join("\n")).toMatch(/read-only/i);
     const replace = await obsidianRetrieve(seededFakeCli(), { query: "replace exact text in integrated gradients", mode: "search" });
     expect(replace.warnings.join("\n")).toMatch(/read-only/i);
+    const folder = await obsidianRetrieve(seededFakeCli(), { query: "create folder Projects/New Area", mode: "search" });
+    expect(folder.warnings.join("\n")).toMatch(/read-only/i);
   });
 
   it("returns setup guidance from obsidian_retrieve itself when no vault is configured", async () => {

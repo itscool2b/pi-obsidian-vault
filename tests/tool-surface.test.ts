@@ -53,12 +53,16 @@ describe("public tool surface", () => {
     expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
     expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "More", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "create_folder", path: "Projects/New Area", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New", query: "somewhere" })).toBe(false);
     const surfaceText = [pi.tools.get("obsidian_write").description, pi.tools.get("obsidian_write").promptSnippet, ...(pi.tools.get("obsidian_write").promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/explicit/i);
     expect(surfaceText).toMatch(/append/i);
+    expect(surfaceText).toMatch(/create_folder/);
+    expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
     expect(surfaceText).toMatch(/overwrite/i);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
   });
 
   it("publishes a strict obsidian_edit schema without destination inference or command fields", () => {

@@ -1,7 +1,7 @@
 import type { EditPreview, EditTargetSummary, EditTransformResult, ObsidianEditError, ObsidianEditNextAction, ObsidianEditOperation, ObsidianEditOutput, ObsidianEditStatus } from "./edit-types.js";
 
 const PREVIEW_CHARS = 500;
-const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "replace_all", "regex_replace", "replace_regex", "fuzzy_replace", "semantic_replace", "inferred_replace", "truncate", "prepend", "delete", "remove", "rename", "move", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "write", "create", "append"]);
+const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "replace_all", "regex_replace", "replace_regex", "fuzzy_replace", "semantic_replace", "inferred_replace", "truncate", "prepend", "delete", "remove", "rename", "move", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "write", "create", "append", "create_folder"]);
 
 export function normalizeEditOperation(value: string | undefined): { operation?: ObsidianEditOperation | undefined; requested?: string | undefined; forbidden: boolean } {
   const requested = value?.trim().toLowerCase();

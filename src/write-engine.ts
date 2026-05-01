@@ -1,6 +1,6 @@
 import { makeError, makeOutput, buildPreview, contentSummary, normalizeOperation } from "./write-guidance.js";
 import { LocalVaultWriter, writeErrorFromUnknown, type VaultWriter } from "./vault-writer.js";
-import type { ObsidianWriteOutput, ObsidianWriteRequest } from "./write-types.js";
+import type { ObsidianWriteOutput, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
 
 export interface ObsidianWriteOptions {
   vaultRoot?: string | undefined;
@@ -17,8 +17,8 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       status: "validation_error",
       dryRun,
       committed: false,
-      message: "obsidian_write requires operation=create or operation=append.",
-      error: makeError("MISSING_OPERATION", "validation", "Provide operation=create or operation=append."),
+      message: "obsidian_write requires operation=create, operation=append, or operation=create_folder.",
+      error: makeError("MISSING_OPERATION", "validation", "Provide operation=create, operation=append, or operation=create_folder."),
     });
   }
 
@@ -29,9 +29,9 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       operation: requestedOperation,
       dryRun,
       committed: false,
-      message: "obsidian_write only supports create and append; the requested operation was refused.",
-      error: makeError(code, "safety", "Use only operation=create or operation=append. Destructive, UI, shell, network, scan, and arbitrary command operations are not supported."),
-      warnings: ["Forbidden or unsupported write operation refused; no note was changed."],
+      message: "obsidian_write only supports create, append, and create_folder; the requested operation was refused.",
+      error: makeError(code, "safety", "Use only operation=create, operation=append, or operation=create_folder. Destructive, UI, shell, network, scan, discovery, and arbitrary command operations are not supported."),
+      warnings: ["Forbidden or unsupported write operation refused; no note or folder was changed."],
     });
   }
 
@@ -41,31 +41,47 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       operation: op.operation,
       dryRun,
       committed: false,
-      message: "obsidian_write requires an explicit vault-relative Markdown path.",
-      error: makeError("MISSING_PATH", "validation", "Provide an explicit safe vault-relative Markdown path; obsidian_write will not infer one."),
+      message: op.operation === "create_folder" ? "obsidian_write create_folder requires an explicit vault-relative folder path." : "obsidian_write requires an explicit vault-relative Markdown path.",
+      error: makeError("MISSING_PATH", "validation", op.operation === "create_folder" ? "Provide an explicit safe vault-relative folder path; obsidian_write will not infer one." : "Provide an explicit safe vault-relative Markdown path; obsidian_write will not infer one."),
     });
   }
 
-  if (request.content === undefined) {
-    return makeOutput({
-      status: "validation_error",
-      operation: op.operation,
-      dryRun,
-      committed: false,
-      message: "obsidian_write requires Markdown content.",
-      error: makeError("MISSING_CONTENT", "validation", "Provide non-empty Markdown content for create or append."),
-    });
-  }
+  let content: WriteContentSummary | undefined;
+  if (op.operation === "create_folder") {
+    if (request.content !== undefined) {
+      return makeOutput({
+        status: "validation_error",
+        operation: op.operation,
+        dryRun,
+        committed: false,
+        message: "obsidian_write create_folder does not accept content.",
+        error: makeError("CONTENT_NOT_ALLOWED", "validation", "Remove content; create_folder only creates an explicit safe folder path and never writes note content."),
+        warnings: ["Supplied content was rejected and was not written or ignored silently."],
+      });
+    }
+  } else {
+    if (request.content === undefined) {
+      return makeOutput({
+        status: "validation_error",
+        operation: op.operation,
+        dryRun,
+        committed: false,
+        message: "obsidian_write requires Markdown content.",
+        error: makeError("MISSING_CONTENT", "validation", "Provide non-empty Markdown content for create or append."),
+      });
+    }
 
-  if (request.content.trim() === "") {
-    return makeOutput({
-      status: "validation_error",
-      operation: op.operation,
-      dryRun,
-      committed: false,
-      message: "obsidian_write content must not be empty.",
-      error: makeError("EMPTY_CONTENT", "validation", "Provide non-empty Markdown content for create or append."),
-    });
+    if (request.content.trim() === "") {
+      return makeOutput({
+        status: "validation_error",
+        operation: op.operation,
+        dryRun,
+        committed: false,
+        message: "obsidian_write content must not be empty.",
+        error: makeError("EMPTY_CONTENT", "validation", "Provide non-empty Markdown content for create or append."),
+      });
+    }
+    content = contentSummary(request.content);
   }
 
   let writer: VaultWriter;
@@ -86,7 +102,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
 
   let safePath: string;
   try {
-    safePath = writer.normalizePath(request.path);
+    safePath = writer.normalizePath(request.path, op.operation);
   } catch (error) {
     const mapped = writeErrorFromUnknown(error);
     return makeOutput({
@@ -94,13 +110,12 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       operation: op.operation,
       dryRun,
       committed: false,
-      message: "The target path is not safe for obsidian_write.",
+      message: op.operation === "create_folder" ? "The target folder path is not safe for obsidian_write." : "The target path is not safe for obsidian_write.",
       error: makeError("UNSAFE_PATH", "safety", mapped.message),
-      warnings: ["Unsafe path refused; no note was changed."],
+      warnings: ["Unsafe path refused; no note or folder was changed."],
     });
   }
 
-  const content = contentSummary(request.content);
   try {
     if (dryRun) {
       const target = await writer.preview({ operation: op.operation, path: safePath, content });
@@ -111,7 +126,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         path: safePath,
         dryRun,
         committed: false,
-        message: `Dry-run preview: obsidian_write would ${op.operation} ${safePath}.`,
+        message: op.operation === "create_folder" ? `Dry-run preview: obsidian_write would create folder ${safePath}.` : `Dry-run preview: obsidian_write would ${op.operation} ${safePath}.`,
         target,
         preview,
       });
@@ -124,7 +139,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       path: safePath,
       dryRun,
       committed: true,
-      message: `obsidian_write ${op.operation} committed for ${safePath}.`,
+      message: op.operation === "create_folder" ? `obsidian_write create_folder committed for ${safePath}.` : `obsidian_write ${op.operation} committed for ${safePath}.`,
       target,
     });
   } catch (error) {
@@ -139,6 +154,42 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         message: "Create refused because the target note already exists.",
         error: makeError("TARGET_EXISTS", "conflict", "Choose a different explicit Markdown path or use append mode if adding to the existing note."),
         warnings: ["Existing note was not overwritten."],
+      });
+    }
+    if (mapped.code === "TARGET_FOLDER_EXISTS") {
+      return makeOutput({
+        status: "conflict",
+        operation: op.operation,
+        path: safePath,
+        dryRun,
+        committed: false,
+        message: "create_folder refused because the target folder already exists.",
+        error: makeError("TARGET_FOLDER_EXISTS", "conflict", "Choose a different explicit folder path or stop if the existing folder is acceptable."),
+        warnings: ["Existing folder was not modified."],
+      });
+    }
+    if (mapped.code === "TARGET_NOT_FOLDER") {
+      return makeOutput({
+        status: "conflict",
+        operation: op.operation,
+        path: safePath,
+        dryRun,
+        committed: false,
+        message: "create_folder refused because a non-folder entry already exists at the target path.",
+        error: makeError("TARGET_NOT_FOLDER", "conflict", "Choose a different explicit folder path; create_folder will not replace files."),
+        warnings: ["Existing file or non-folder target was not modified."],
+      });
+    }
+    if (mapped.code === "PARENT_NOT_FOLDER") {
+      return makeOutput({
+        status: "conflict",
+        operation: op.operation,
+        path: safePath,
+        dryRun,
+        committed: false,
+        message: "create_folder refused because a non-folder entry blocks the parent path.",
+        error: makeError("PARENT_NOT_FOLDER", "conflict", "Choose a different explicit folder path; create_folder will not replace files in the parent chain."),
+        warnings: ["Existing parent-path file or non-folder entry was not modified."],
       });
     }
     if (mapped.code === "TARGET_MISSING") {
@@ -160,9 +211,9 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         path: safePath,
         dryRun,
         committed: false,
-        message: "The target path is not safe for obsidian_write.",
+        message: op.operation === "create_folder" ? "The target folder path is not safe for obsidian_write." : "The target path is not safe for obsidian_write.",
         error: makeError("UNSAFE_PATH", "safety", mapped.message),
-        warnings: ["Unsafe path refused; no note was changed."],
+        warnings: ["Unsafe path refused; no note or folder was changed."],
       });
     }
     if (mapped.category === "setup") {
@@ -186,7 +237,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       committed: false,
       message: "obsidian_write could not complete the write safely.",
       error: makeError("WRITE_FAILED", "runtime", "The write failed before a safe success result could be produced."),
-      warnings: ["No overwrite, delete, rename, move, or open action was attempted."],
+      warnings: ["No overwrite, delete, rename, move, open, or destructive folder action was attempted."],
     });
   }
 }

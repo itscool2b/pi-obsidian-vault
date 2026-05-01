@@ -61,13 +61,13 @@ const ObsidianRetrieveParams = Type.Object({
 });
 
 const ObsidianWriteParams = Type.Object({
-  operation: Type.Optional(Type.String({ description: "Write operation. Supported semantic values are create and append; forbidden operations return safety_refusal." })),
-  path: Type.Optional(Type.String({ description: "Explicit vault-relative Markdown path. obsidian_write never infers destinations from query/topic text." })),
-  content: Type.Optional(Type.String({ description: "Markdown content to create or append exactly as supplied. Must be non-empty for supported operations." })),
-  dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes. Set false only after explicit confirmation." })),
+  operation: Type.Optional(Type.String({ description: "Write operation. Supported semantic values are create, append, and create_folder; forbidden operations return safety_refusal." })),
+  path: Type.Optional(Type.String({ description: "Explicit vault-relative Markdown path for create/append or folder path for create_folder. obsidian_write never infers destinations from query/topic text." })),
+  content: Type.Optional(Type.String({ description: "Markdown content to create or append exactly as supplied. Must be non-empty for create/append and must be omitted for create_folder." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes or folders. Set false only after explicit confirmation." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create and append. dryRun defaults to true. Paths must be explicit safe vault-relative Markdown paths; no overwrite, delete, rename, move, open UI, shell, network, scan, or arbitrary CLI behavior is supported.",
+  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create, append, and create_folder. dryRun defaults to true. Markdown note operations require explicit safe vault-relative .md paths and non-empty content; create_folder requires an explicit safe vault-relative folder path and rejects content with CONTENT_NOT_ALLOWED. No overwrite, delete, rename, move, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 const ObsidianEditParams = Type.Object({
@@ -121,15 +121,16 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_write",
     label: "Obsidian Write",
-    description: "Create or append Markdown notes in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve. Supports operation=create or operation=append, path, content, and dryRun. dryRun defaults to true. Never overwrites, deletes, renames, moves, opens the UI, runs shell/network calls, scans the vault, or executes arbitrary CLI commands.",
-    promptSnippet: "Use obsidian_write only for explicit safe Markdown create/append requests. Prefer dryRun=true previews before committing with dryRun=false.",
+    description: "Create or append Markdown notes, or create folders, in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve and obsidian_edit. Supports operation=create, operation=append, or operation=create_folder, plus path, content for create/append only, and dryRun. dryRun defaults to true. Never overwrites, deletes, renames, moves, opens the UI, runs shell/network calls, scans the vault, discovers filesystem structure, or executes arbitrary CLI commands.",
+    promptSnippet: "Use obsidian_write only for explicit safe Markdown create/append or folder create_folder requests. Prefer dryRun=true previews before committing with dryRun=false.",
     promptGuidelines: [
-      "Use obsidian_write only when the user wants to create a new Markdown note or append to an existing Markdown note at an explicit vault-relative .md path.",
-      "Use obsidian_write with dryRun=true or omitted to preview writes; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
-      "obsidian_write requires operation=create or operation=append, path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
-      "obsidian_write appends Markdown exactly as supplied; include desired leading newlines, headings, or separators in content.",
-      "obsidian_write refuses overwrite, delete, rename, move, open UI, shell, network, scan, and arbitrary CLI requests with safety_refusal.",
-      "Use obsidian_retrieve for reading/searching Obsidian; obsidian_retrieve remains read-only.",
+      "Use obsidian_write only when the user wants to create a new Markdown note, append to an existing Markdown note, or create an explicit safe vault-relative folder.",
+      "Use obsidian_write with dryRun=true or omitted to preview writes/folder creation; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "For Markdown notes, obsidian_write requires operation=create or operation=append, an explicit safe vault-relative .md path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
+      "For folders, obsidian_write requires operation=create_folder and an explicit safe vault-relative folder path; omit content, because supplied content is rejected with CONTENT_NOT_ALLOWED and no file is created or modified.",
+      "obsidian_write appends Markdown exactly as supplied for append; include desired leading newlines, headings, or separators in content.",
+      "obsidian_write refuses overwrite, delete, rename, move, open UI, shell, network, scan, discovery, and arbitrary CLI requests with safety_refusal.",
+      "Use obsidian_retrieve for reading/searching Obsidian; obsidian_retrieve remains read-only. Use obsidian_edit only for controlled edits to existing Markdown notes.",
     ],
     parameters: ObsidianWriteParams,
     async execute(_toolCallId: string, params: ObsidianWriteRequest) {
@@ -152,7 +153,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "Section headings must be exact ATX Markdown headings such as ## Plan; duplicate matching headings return ambiguity and must not be resolved automatically.",
       "Frontmatter edits affect only top-of-file YAML frontmatter; update_frontmatter may create frontmatter, remove_frontmatter requires an existing property.",
       "obsidian_edit refuses create, full-note overwrite, delete, rename, move, open UI, shell, network, regex, fuzzy, scan, and arbitrary CLI requests with safety_refusal.",
-      "Use obsidian_write only for create/append; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and write create/append-only.",
+      "Use obsidian_write only for create/append/create_folder; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and keep folder creation out of obsidian_edit."
     ],
     parameters: ObsidianEditParams,
     async execute(_toolCallId: string, params: ObsidianEditRequest) {

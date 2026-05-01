@@ -46,6 +46,22 @@ export function normalizeVaultFolder(input = ""): string {
   return normalizeVaultRelativePath(input, { allowEmpty: true, requireMarkdown: false });
 }
 
+export function normalizeVaultFolderTarget(input: string): string {
+  const normalized = normalizeVaultRelativePath(input, { allowEmpty: false, requireMarkdown: false }).replace(/\/+$/g, "");
+  if (normalized === "." || normalized === "") {
+    throw new PathSafetyError("Folder path must not target the vault root", "EMPTY_PATH");
+  }
+  const segments = normalized.split("/");
+  if (segments.some((segment) => /^[A-Za-z]:/.test(segment))) {
+    throw new PathSafetyError("Path must be vault-relative", "ABSOLUTE_PATH");
+  }
+  const finalSegment = segments.at(-1) ?? "";
+  if (path.posix.extname(finalSegment) !== "") {
+    throw new PathSafetyError("Folder path must not look like a file path", "FILE_EXTENSION");
+  }
+  return normalized;
+}
+
 export function isSafeMarkdownPath(input: string): boolean {
   try {
     normalizeVaultRelativePath(input, { allowEmpty: false, requireMarkdown: true });
@@ -58,6 +74,15 @@ export function isSafeMarkdownPath(input: string): boolean {
 export function isSafeFolderPath(input: string): boolean {
   try {
     normalizeVaultFolder(input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isSafeFolderTargetPath(input: string): boolean {
+  try {
+    normalizeVaultFolderTarget(input);
     return true;
   } catch {
     return false;

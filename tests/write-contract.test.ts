@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { obsidianWrite } from "../src/write-engine.js";
 import { registerObsidianVault } from "../src/index.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
-import { fakePi, registerWriteTool, seedNote, stringifyDetails, withTempVault } from "./write-test-utils.js";
+import { fakePi, registerWriteTool, seedFolder, seedNote, stringifyDetails, withTempVault } from "./write-test-utils.js";
 
 describe("obsidian_write contract", () => {
   it("registers obsidian_write separately with strict top-level fields", async () => {
@@ -16,10 +16,12 @@ describe("obsidian_write contract", () => {
     expect(schema.additionalProperties).toBe(false);
     expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
+    expect(Value.Check(schema, { operation: "create_folder", path: "Projects/New Area" })).toBe(true);
     expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "x", query: "somewhere" })).toBe(false);
     const surfaceText = [tool.description, tool.promptSnippet, ...(tool.promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/dryRun/i);
-    expect(surfaceText).toMatch(/create/i);
+    expect(surfaceText).toMatch(/create_folder/i);
+    expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
     expect(surfaceText).toMatch(/append/i);
     expect(surfaceText).not.toContain('"query"');
   });
@@ -37,6 +39,11 @@ describe("obsidian_write contract", () => {
 
       const missingPath = await tool.execute("id", { operation: "create", content: "# Missing path" });
       expect(missingPath.details).toMatchObject({ status: "validation_error", committed: false, error: { code: "MISSING_PATH" } });
+
+      await seedFolder(vaultRoot, "Folders/Existing");
+      const folderConflict = await tool.execute("id", { operation: "create_folder", path: "Folders/Existing", dryRun: false });
+      expect(folderConflict.details).toMatchObject({ status: "conflict", operation: "create_folder", committed: false, error: { code: "TARGET_FOLDER_EXISTS" } });
+      expect(folderConflict.details.nextActions.map((action: any) => action.action)).toContain("choose_different_path");
     });
   });
 
@@ -54,7 +61,11 @@ describe("obsidian_write contract", () => {
       expect(preview).toMatchObject({ status: "preview", dryRun: true, committed: false, preview: { wouldCreate: true, contentChars: 1 } });
       expect(preview.nextActions.map((action) => action.action)).toContain("confirm_preview");
 
-      for (const result of [append, missing, preview]) {
+      const folderPreview = await obsidianWrite({ operation: "create_folder", path: "Folders/Preview" }, { vaultRoot });
+      expect(folderPreview).toMatchObject({ status: "preview", operation: "create_folder", dryRun: true, committed: false, preview: { targetKind: "folder", wouldCreateFolder: true } });
+      expect(folderPreview.preview).not.toHaveProperty("contentPreview");
+
+      for (const result of [append, missing, preview, folderPreview]) {
         const text = stringifyDetails(result);
         expect(text).not.toContain(vaultRoot);
         expect(text).not.toMatch(/\/tmp\/pi-obsidian-write-/);
@@ -72,6 +83,9 @@ describe("obsidian_write contract", () => {
 
       const unsupported = await obsidianWrite({ operation: "upsert", path: "Notes/New.md", content: "x", dryRun: false }, { vaultRoot });
       expect(unsupported).toMatchObject({ status: "safety_refusal", error: { code: "UNSUPPORTED_OPERATION", category: "safety" }, committed: false });
+
+      const folderContent = await obsidianWrite({ operation: "create_folder", path: "Folders/With Content", content: "x", dryRun: false }, { vaultRoot });
+      expect(folderContent).toMatchObject({ status: "validation_error", error: { code: "CONTENT_NOT_ALLOWED", category: "validation" }, committed: false });
     });
   });
 

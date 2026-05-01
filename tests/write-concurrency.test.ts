@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { obsidianWrite } from "../src/write-engine.js";
-import { readNote, seedNote, withTempVault } from "./write-test-utils.js";
+import { folderExists, readNote, seedNote, withTempVault } from "./write-test-utils.js";
 
 describe("obsidian_write concurrency", () => {
   it("serializes concurrent appends to the same normalized target path without lost updates", async () => {
@@ -30,6 +30,31 @@ describe("obsidian_write concurrency", () => {
       expect(writes.filter((result) => result.status === "success")).toHaveLength(1);
       expect(writes.filter((result) => result.status === "conflict")).toHaveLength(2);
       expect(["one", "two", "three"]).toContain(await readNote(vaultRoot, "Race/New.md"));
+    });
+  });
+
+  it("serializes concurrent create_folder calls to the same normalized target", async () => {
+    await withTempVault(async (vaultRoot) => {
+      const writes = await Promise.all([
+        obsidianWrite({ operation: "create_folder", path: "Race/New Folder", dryRun: false }, { vaultRoot }),
+        obsidianWrite({ operation: "create_folder", path: "@Race/New Folder", dryRun: false }, { vaultRoot }),
+        obsidianWrite({ operation: "create_folder", path: "Race/New Folder", dryRun: false }, { vaultRoot }),
+      ]);
+      expect(writes.filter((result) => result.status === "success")).toHaveLength(1);
+      expect(writes.filter((result) => result.status === "conflict" && result.error?.code === "TARGET_FOLDER_EXISTS")).toHaveLength(2);
+      expect(await folderExists(vaultRoot, "Race/New Folder")).toBe(true);
+    });
+  });
+
+  it("allows different create_folder targets to succeed independently", async () => {
+    await withTempVault(async (vaultRoot) => {
+      const writes = await Promise.all([
+        obsidianWrite({ operation: "create_folder", path: "Race/A", dryRun: false }, { vaultRoot }),
+        obsidianWrite({ operation: "create_folder", path: "Race/B", dryRun: false }, { vaultRoot }),
+      ]);
+      expect(writes.every((result) => result.status === "success" && result.committed)).toBe(true);
+      expect(await folderExists(vaultRoot, "Race/A")).toBe(true);
+      expect(await folderExists(vaultRoot, "Race/B")).toBe(true);
     });
   });
 });
