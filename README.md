@@ -1,24 +1,26 @@
 # Pi Obsidian Vault Harness
 
-A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writing, and safe structured editing.
+A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writing, safe structured editing, and controlled single-note management.
 
 - Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only.
 - Writing uses explicit vault-relative paths under a configured local vault path and supports only Markdown create/append, folder creation, and dry-run preview.
 - Structured editing uses explicit vault-relative Markdown paths to existing notes and supports only section replacement/insertion, top-of-file frontmatter property updates/removals, and literal exact-text replacement.
+- Note management uses explicit vault-relative Markdown source/destination paths and supports only dry-run-first single-note `move_note` moves/renames.
 
 ## Public tool surface
 
-The extension registers three Pi-facing tools:
+The extension registers four Pi-facing tools:
 
 - `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, and project/topic retrieval. Strictly read-only.
 - `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
+- `obsidian_manage` — safe single-note move/rename management via `move_note` only. Dry-run preview is the default.
 
 It also registers the existing status command:
 
-- `/obsidian-vault` — reports retrieval CLI/vault configuration health, local write availability, and `obsidian_edit` availability as available, unavailable, or degraded without exposing the local vault root.
+- `/obsidian-vault` — reports retrieval CLI/vault configuration health, local write availability, `obsidian_edit` availability, and `obsidian_manage` availability as available, unavailable, or degraded without exposing the local vault root.
 
-Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open intent and never performs side effects. `obsidian_write` refuses overwrite, delete, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests.
+Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move intent and never performs side effects. `obsidian_write` refuses overwrite, delete, rename, move, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, rename, move, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, including folder moves, overwrite, delete, copy, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
 ## First-time setup
 
@@ -34,9 +36,9 @@ cat > ~/.pi/agent/obsidian-vault.json <<'JSON'
 JSON
 ```
 
-Replace `/absolute/path/to/vault` with your real vault folder, then run `/obsidian-vault` in Pi. The status command is side-effect-free: it reports whether the CLI can reach a running Obsidian instance, whether local writes are available, and whether `obsidian_edit` is available, unavailable, or degraded. It does not open Obsidian and does not expose the local vault root in status output. If `obsidian` opens the desktop app on your system, use `obsidian-cli` for `cliPath`/`OBSIDIAN_CLI_PATH`.
+Replace `/absolute/path/to/vault` with your real vault folder, then run `/obsidian-vault` in Pi. The status command is side-effect-free: it reports whether the CLI can reach a running Obsidian instance, whether local writes are available, and whether `obsidian_edit` and `obsidian_manage` are available, unavailable, or degraded. It does not open Obsidian and does not expose the local vault root in status output. If `obsidian` opens the desktop app on your system, use `obsidian-cli` for `cliPath`/`OBSIDIAN_CLI_PATH`.
 
-`obsidian_write` and `obsidian_edit` require a local `vaultPath`/`OBSIDIAN_VAULT_PATH`. Vault name/id targets are retrieval-only because safe local mutations must be resolved under a configured local vault directory.
+`obsidian_write`, `obsidian_edit`, and `obsidian_manage` require a local `vaultPath`/`OBSIDIAN_VAULT_PATH`. Vault name/id targets are retrieval-only because safe local mutations must be resolved under a configured local vault directory.
 
 ### Pi-assisted setup prompt
 
@@ -56,7 +58,7 @@ Please:
 4. Verify the vault path exists and is a directory.
 5. Do not scan, read, modify, open, or write any notes in the vault.
 6. After setup, tell me whether I need to restart Pi.
-7. Ask me to run /obsidian-vault and confirm it shows Source: config, Writes: available, and obsidian_edit: available.
+7. Ask me to run /obsidian-vault and confirm it shows Source: config, Writes: available, obsidian_edit: available, and obsidian_manage: available.
 ```
 
 You can also configure through environment variables:
@@ -238,6 +240,34 @@ Commit the same exact-text replacement after confirmation by sending the same ex
 
 Section headings must match exactly after Markdown heading normalization. Duplicate matching headings return `ambiguous`; missing headings and missing notes return `not_found`. Frontmatter edits affect only YAML frontmatter at the very top of the file and preserve the note body outside frontmatter. Exact-text edits match `oldText` literally once with no regex, fuzzy, semantic, normalized, or inferred matching; missing text returns `not_found`, duplicate text returns `ambiguous`, and full-note replacement is refused.
 
+## Manage usage examples
+
+Supported `obsidian_manage` top-level request fields are exactly: `operation`, `fromPath`, `toPath`, and `dryRun`.
+
+The only supported operation is `move_note`. `dryRun` defaults to `true`, so the first call previews without moving anything.
+
+Dry-run note move preview:
+
+```json
+{ "operation": "move_note", "fromPath": "Projects/Plan.md", "toPath": "Archive/Plan.md", "dryRun": true }
+```
+
+Committed move after confirmation:
+
+```json
+{ "operation": "move_note", "fromPath": "Projects/Plan.md", "toPath": "Archive/Plan.md", "dryRun": false }
+```
+
+Rename within the same folder:
+
+```json
+{ "operation": "move_note", "fromPath": "Projects/Plan.md", "toPath": "Projects/Roadmap.md", "dryRun": false }
+```
+
+`move_note` requires both paths to be explicit safe vault-relative Markdown note paths. The source note must already exist, the destination path must not exist, and the destination parent folder must already exist. Missing sources return deterministic `not_found` / `SOURCE_NOT_FOUND`; missing destination parents return deterministic `not_found` / `PARENT_MISSING`; existing destinations return deterministic `conflict` / `TARGET_EXISTS`; parent files return deterministic `conflict` / `PARENT_NOT_FOLDER`.
+
+`move_note` moves or renames exactly one Markdown file. It does not move folders, overwrite destinations, delete, copy, rewrite links, create parent folders, open Obsidian, scan or discover the vault, run shell/network calls, or execute arbitrary CLI commands.
+
 ## Safety model
 
 - `obsidian_retrieve` is read-only. It does not write, append, rename, move, delete, open UI, run shell commands, or mutate notes.
@@ -250,11 +280,13 @@ Section headings must match exactly after Markdown heading normalization. Duplic
 - `obsidian_write` is separate from retrieval and only supports Markdown create/append, folder create_folder, and dry-run preview.
 - `create_folder` creates only explicit safe vault-relative folders, rejects supplied content with `CONTENT_NOT_ALLOWED`, refuses hidden/.obsidian/traversal/absolute/extension-looking targets, and never creates or modifies Markdown files.
 - `obsidian_edit` is separate from retrieval and writing and only supports structured edits to existing Markdown notes.
+- `obsidian_manage` is separate from retrieval, writing, and editing and only supports `move_note` for exactly one existing Markdown note.
 - `replace_exact_text` replaces only one exact literal span inside an existing note; it does not support regex, fuzzy matching, replace-all, occurrence selection, inferred target text, or full-note replacement.
-- Write/edit note paths must be explicit vault-relative Markdown paths. Folder creation paths must be explicit vault-relative non-root folder paths. Absolute paths, Windows absolute paths, `.`, `..`, hidden paths, `.obsidian`, non-Markdown note targets, extension-looking folder targets, and encoded traversal are refused.
+- Write/edit/manage note paths must be explicit vault-relative Markdown paths. Folder creation paths must be explicit vault-relative non-root folder paths. Absolute paths, Windows absolute paths, `.`, `..`, hidden paths, `.obsidian`, non-Markdown note targets, extension-looking folder targets, and encoded traversal are refused.
 - `obsidian_edit` never creates notes. Missing target notes return deterministic `not_found` / `TARGET_MISSING` results without partial mutation.
-- Committed writes, folder creations, and edits are serialized per normalized vault-relative target path, including mixed `obsidian_write` + `obsidian_edit` mutations to the same note. Different safe target paths are not forced through a global queue.
-- Write/edit responses expose safe vault-relative paths only, not the configured vault root or absolute target paths.
+- `obsidian_manage move_note` never creates parent folders, overwrites destinations, moves folders, deletes, copies, rewrites links, scans, discovers, opens UI, shells out, or uses network calls. Missing destination parents return deterministic `not_found` / `PARENT_MISSING` results without partial mutation.
+- Committed writes, folder creations, edits, and manage moves are serialized per normalized vault-relative target path. `obsidian_manage move_note` locks both source and destination paths and shares the same target-lock namespace as `obsidian_write` and `obsidian_edit`; different safe target paths are not forced through a global queue.
+- Write/edit/manage responses expose safe vault-relative paths only, not the configured vault root or absolute source/destination/target paths.
 
 ## Development
 

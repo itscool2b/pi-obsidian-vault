@@ -16,10 +16,10 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, and the existing status command", () => {
+  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
     expect([...pi.commands.keys()]).toEqual(["obsidian-vault"]);
   });
 
@@ -62,7 +62,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/create_folder/);
     expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
     expect(surfaceText).toMatch(/overwrite/i);
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
   });
 
   it("publishes a strict obsidian_edit schema without destination inference or command fields", () => {
@@ -84,7 +84,27 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
     expect(surfaceText).toMatch(/create, full-note overwrite, delete, rename, move/i);
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+  });
+
+  it("publishes a strict obsidian_manage schema for move_note only", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const schema = pi.tools.get("obsidian_manage").parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "toPath"]);
+    expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
+    expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", content: "x" })).toBe(false);
+    const surfaceText = [pi.tools.get("obsidian_manage").description, pi.tools.get("obsidian_manage").promptSnippet, ...(pi.tools.get("obsidian_manage").promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/move_note/);
+    expect(surfaceText).toMatch(/fromPath/);
+    expect(surfaceText).toMatch(/toPath/);
+    expect(surfaceText).toMatch(/PARENT_MISSING/);
+    expect(surfaceText).toMatch(/dryRun/i);
+    expect(surfaceText).toMatch(/overwrite/i);
+    expect(surfaceText).toMatch(/link/i);
   });
 
   it("reports obsidian_edit status without leaking vaultRoot or absolute paths", async () => {
@@ -95,6 +115,7 @@ describe("public tool surface", () => {
     await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string) { messages.push(message); } } });
     const message = messages.join("\n");
     expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
+    expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
     expect(message).not.toContain(tempRoot);
     expect(message).not.toMatch(/\/tmp\/pi-obsidian-status-vault/);
   });
@@ -123,6 +144,7 @@ describe("public tool surface", () => {
 
       expect(message).toContain("CLI: configured absolute path redacted");
       expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
+      expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
       expect(message).not.toContain(vaultRoot);
       expect(message).not.toContain(absoluteTargetPath);
       expect(message).not.toContain(absoluteCliPath);

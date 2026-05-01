@@ -2,14 +2,16 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";
-import { editStatusFromConfig, loadConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
+import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
 import { obsidianEdit } from "./edit-engine.js";
+import { obsidianManage } from "./manage-engine.js";
 import { obsidianWrite } from "./write-engine.js";
 import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
 import type { ObsidianEditRequest } from "./edit-types.js";
+import type { ObsidianManageRequest } from "./manage-types.js";
 import type { ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
@@ -17,8 +19,10 @@ export { loadConfig } from "./config.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
 export { obsidianEdit } from "./edit-engine.js";
+export { obsidianManage } from "./manage-engine.js";
 export { obsidianWrite } from "./write-engine.js";
 export * from "./edit-types.js";
+export * from "./manage-types.js";
 export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
@@ -83,6 +87,16 @@ const ObsidianEditParams = Type.Object({
 }, {
   additionalProperties: false,
   description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
+});
+
+const ObsidianManageParams = Type.Object({
+  operation: Type.Optional(Type.String({ description: "Manage operation. Supported semantic value is exactly move_note; forbidden operations return safety_refusal." })),
+  fromPath: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown source note path. obsidian_manage never infers sources from search, title, alias, or folder scans." })),
+  toPath: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown destination note path. Destination must not exist and its parent folder must already exist." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without moving anything. Set false only after explicit confirmation." })),
+}, {
+  additionalProperties: false,
+  description: "obsidian_manage arguments. Supported top-level fields only: operation, fromPath, toPath, dryRun. Supported operation is exactly move_note. move_note moves or renames exactly one existing Markdown note from an explicit safe vault-relative fromPath to an explicit safe vault-relative toPath. dryRun defaults to true. Source must exist, destination must not exist, and destination parent folder must already exist. No folder moves, overwrite, delete, copy, link rewrite, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
@@ -153,7 +167,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "Section headings must be exact ATX Markdown headings such as ## Plan; duplicate matching headings return ambiguity and must not be resolved automatically.",
       "Frontmatter edits affect only top-of-file YAML frontmatter; update_frontmatter may create frontmatter, remove_frontmatter requires an existing property.",
       "obsidian_edit refuses create, full-note overwrite, delete, rename, move, open UI, shell, network, regex, fuzzy, scan, and arbitrary CLI requests with safety_refusal.",
-      "Use obsidian_write only for create/append/create_folder; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and keep folder creation out of obsidian_edit."
+      "Use obsidian_write only for create/append/create_folder; use obsidian_manage only for move_note; use obsidian_retrieve only for reading/searching. Keep retrieval read-only and keep folder creation/move management out of obsidian_edit."
     ],
     parameters: ObsidianEditParams,
     async execute(_toolCallId: string, params: ObsidianEditRequest) {
@@ -163,14 +177,37 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     },
   });
 
+  pi.registerTool({
+    name: "obsidian_manage",
+    label: "Obsidian Manage",
+    description: "Safely move or rename exactly one existing Markdown note in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve, obsidian_write, and obsidian_edit. Supports only operation=move_note, fromPath, toPath, and dryRun. dryRun defaults to true. Source note must exist, destination note must not exist, and destination parent folder must already exist. Never moves folders, overwrites, deletes, copies, rewrites links, opens the UI, runs shell/network calls, scans the vault, discovers filesystem structure, or executes arbitrary CLI commands.",
+    promptSnippet: "Use obsidian_manage only for explicit safe single-note move/rename requests with operation=move_note. Prefer dryRun=true previews before committing with dryRun=false.",
+    promptGuidelines: [
+      "Use obsidian_manage only when the user wants to move or rename exactly one existing Markdown note from an explicit safe vault-relative fromPath to an explicit safe vault-relative toPath.",
+      "obsidian_manage supports only operation=move_note. Do not use it for folder moves, multi-note moves, delete, copy, overwrite, link rewriting, UI open, shell, network, scan, discovery, or arbitrary commands.",
+      "Use obsidian_manage with dryRun=true or omitted to preview; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "move_note requires fromPath and toPath to be different safe vault-relative .md paths. The source note must already exist, the destination must not exist, and the destination parent folder must already exist.",
+      "If the destination parent folder is missing, obsidian_manage returns status=not_found with error.code=PARENT_MISSING; create the folder separately with obsidian_write create_folder only if the user requests it.",
+      "obsidian_manage responses expose only vault-relative paths and never expose the vault root, absolute source/destination paths, absolute CLI paths, or lock keys.",
+      "Keep obsidian_retrieve read-only, obsidian_write limited to create/append/create_folder, and obsidian_edit limited to controlled content edits of existing Markdown notes.",
+    ],
+    parameters: ObsidianManageParams,
+    async execute(_toolCallId: string, params: ObsidianManageRequest) {
+      const config = await loadConfig(options);
+      const result = await obsidianManage(params, { vaultRoot: config.vaultRoot });
+      return toolResponse(result);
+    },
+  });
+
   pi.registerCommand("obsidian-vault", {
-    description: "Show configured Obsidian CLI retrieval, write, and structured edit status",
+    description: "Show configured Obsidian CLI retrieval, write, structured edit, and note management status",
     handler: async (_args: string, ctx: { ui: { notify(message: string, level?: string): void } }) => {
       const backend = await backendFromOptions(options);
       const config = await loadConfig(options);
       const status = config ? statusFromConfig(config) : undefined;
       const writeStatus = config ? await writeStatusFromConfig(config) : undefined;
       const editStatus = config ? await editStatusFromConfig(config) : undefined;
+      const manageStatus = config ? await manageStatusFromConfig(config) : undefined;
       const health = await backend.checkHealth({ allowAutoLaunch: false });
       const lines = [
         `Obsidian Vault: ${health.available ? "CLI available" : "CLI unavailable"}`,
@@ -182,10 +219,11 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       if (status?.vaultTarget || health.vaultTarget) lines.push(`Vault target: ${status?.vaultTarget ?? health.vaultTarget}`);
       if (writeStatus) lines.push(`Writes: ${writeStatus.writable ? "available" : "unavailable"}`);
       if (editStatus) lines.push(`obsidian_edit: ${editStatus.status}`);
+      if (manageStatus) lines.push(`obsidian_manage: ${manageStatus.status}`);
       const extraSensitivePaths = [health.cliPath];
-      for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
-      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? [])]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
-      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) && (editStatus?.status !== "degraded") ? "info" : "warning");
+      for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? []), ...(manageStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
+      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? []), ...(manageStatus?.warnings ?? [])]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
+      ctx.ui.notify(lines.join("\n"), health.available && (writeStatus?.writable ?? true) && (editStatus?.status !== "degraded") && (manageStatus?.status !== "degraded") ? "info" : "warning");
     },
   });
 }

@@ -10,7 +10,7 @@ describe("obsidian_edit contract", () => {
   it("registers obsidian_edit separately with strict top-level fields", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
 
     const tool = pi.tools.get("obsidian_edit");
     const schema = tool.parameters;

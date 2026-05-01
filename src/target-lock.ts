@@ -14,3 +14,13 @@ export async function withTargetLock<T>(key: string, run: () => Promise<T>): Pro
     if (queues.get(key) === next) queues.delete(key);
   }
 }
+
+export async function withTargetLocks<T>(keys: string[], run: () => Promise<T>): Promise<T> {
+  const orderedKeys = [...new Set(keys)].sort();
+  async function acquire(index: number): Promise<T> {
+    const key = orderedKeys[index];
+    if (!key) return run();
+    return withTargetLock(key, () => acquire(index + 1));
+  }
+  return acquire(0);
+}

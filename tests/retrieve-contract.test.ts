@@ -13,12 +13,12 @@ function fakePi() {
 }
 
 describe("obsidian_retrieve contract", () => {
-  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, plus status command and supports backend injection", async () => {
+  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, obsidian_manage, plus status command and supports backend injection", async () => {
     const pi = fakePi();
     const backend = seededFakeCli();
     registerObsidianVault(pi as any, { backend });
 
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
     expect(pi.commands.has("obsidian-vault")).toBe(true);
     const result = await pi.tools.get("obsidian_retrieve").execute("id", { query: "IG", mode: "search" });
     expect(result.details.candidates[0].path).toBe("Research/Integrated Gradients/index.md");

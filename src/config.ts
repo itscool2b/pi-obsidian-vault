@@ -54,6 +54,14 @@ export interface EditVaultStatus {
   warnings: string[];
 }
 
+export interface ManageVaultStatus {
+  configured: boolean;
+  source: VaultConfig["vaultPathSource"];
+  status: "available" | "unavailable" | "degraded";
+  errors: string[];
+  warnings: string[];
+}
+
 export async function loadConfig(options: LoadConfigOptions = {}): Promise<VaultConfig> {
   const env = options.env ?? process.env;
   const configPath = options.configPath ?? path.join(homedir(), FALLBACK_CONFIG_PATH);
@@ -147,6 +155,22 @@ export async function editStatusFromConfig(config: VaultConfig): Promise<EditVau
     await access(config.vaultRoot, fsConstants.R_OK | fsConstants.W_OK);
   } catch {
     errors.push("Configured vault path is not readable and writable for obsidian_edit.");
+  }
+  return { configured: true, source: config.vaultPathSource, status: errors.length === 0 ? "available" : "degraded", errors, warnings };
+}
+
+export async function manageStatusFromConfig(config: VaultConfig): Promise<ManageVaultStatus> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (!config.vaultRoot) {
+    if (config.vaultTarget) warnings.push("obsidian_manage requires a local vaultPath; vault name/id targets are retrieval-only.");
+    errors.push("Local vault path is required for obsidian_manage. Set OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json vaultPath.");
+    return { configured: false, source: config.vaultPathSource, status: "unavailable", errors, warnings };
+  }
+  try {
+    await access(config.vaultRoot, fsConstants.R_OK | fsConstants.W_OK);
+  } catch {
+    errors.push("Configured vault path is not readable and writable for obsidian_manage.");
   }
   return { configured: true, source: config.vaultPathSource, status: errors.length === 0 ? "available" : "degraded", errors, warnings };
 }

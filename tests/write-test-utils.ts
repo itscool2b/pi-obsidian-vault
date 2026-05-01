@@ -76,6 +76,12 @@ export function registerEditTool(vaultRoot: string) {
   return pi.tools.get("obsidian_edit");
 }
 
+export function registerManageTool(vaultRoot: string) {
+  const pi = fakePi();
+  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  return pi.tools.get("obsidian_manage");
+}
+
 export function expectNoLocalPathLeak(value: unknown, vaultRoot: string): void {
   const text = stringifyDetails(value);
   if (text.includes(vaultRoot)) throw new Error(`Response leaked vault root: ${text}`);
