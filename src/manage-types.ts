@@ -1,3 +1,5 @@
+import type { CommitTokenErrorCode, CommitTokenMetadata } from "./commit-token-types.js";
+
 export type ObsidianManageOperation = "move_note" | "trash_note" | "restore_note" | "copy_note";
 export type ObsidianManageStatus = "success" | "preview" | "validation_error" | "safety_refusal" | "conflict" | "not_found" | "setup_required" | "manage_failed";
 export type ObsidianManageErrorCategory = "validation" | "safety" | "conflict" | "not_found" | "setup" | "runtime";
@@ -11,6 +13,7 @@ export interface ObsidianManageRequest {
   trashPath?: string | undefined;
   trashFolder?: string | undefined;
   dryRun?: boolean | undefined;
+  confirmationToken?: string | undefined;
 }
 
 export interface ManageTargetSummary {
@@ -142,7 +145,7 @@ export interface CopyPreview {
 }
 
 export interface ObsidianManageError {
-  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_FROM_PATH" | "MISSING_TO_PATH" | "MISSING_PATH" | "MISSING_TRASH_PATH" | "UNSAFE_FROM_PATH" | "UNSAFE_TO_PATH" | "UNSAFE_PATH" | "UNSAFE_TRASH_PATH" | "UNSAFE_TRASH_FOLDER" | "SAME_PATH" | "SOURCE_NOT_FOUND" | "SOURCE_NOT_NOTE" | "SOURCE_NOT_MARKDOWN" | "SOURCE_IS_FOLDER" | "SOURCE_NOT_FILE" | "TRASH_SOURCE_NOT_FOUND" | "TRASH_SOURCE_NOT_MARKDOWN" | "TRASH_SOURCE_IS_FOLDER" | "TRASH_SOURCE_NOT_FILE" | "TARGET_NOT_MARKDOWN" | "TRASH_PATH_OUTSIDE_TRASH" | "TARGET_EXISTS" | "PARENT_MISSING" | "PARENT_NOT_FOLDER" | "TRASH_FOLDER_NOT_FOLDER" | "TRASH_TARGET_EXISTS" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "MOVE_FAILED" | "TRASH_FAILED" | "RESTORE_FAILED" | "COPY_FAILED";
+  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_FROM_PATH" | "MISSING_TO_PATH" | "MISSING_PATH" | "MISSING_TRASH_PATH" | "UNSAFE_FROM_PATH" | "UNSAFE_TO_PATH" | "UNSAFE_PATH" | "UNSAFE_TRASH_PATH" | "UNSAFE_TRASH_FOLDER" | "SAME_PATH" | "SOURCE_NOT_FOUND" | "SOURCE_NOT_NOTE" | "SOURCE_NOT_MARKDOWN" | "SOURCE_IS_FOLDER" | "SOURCE_NOT_FILE" | "TRASH_SOURCE_NOT_FOUND" | "TRASH_SOURCE_NOT_MARKDOWN" | "TRASH_SOURCE_IS_FOLDER" | "TRASH_SOURCE_NOT_FILE" | "TARGET_NOT_MARKDOWN" | "TRASH_PATH_OUTSIDE_TRASH" | "TARGET_EXISTS" | "PARENT_MISSING" | "PARENT_NOT_FOLDER" | "TRASH_FOLDER_NOT_FOLDER" | "TRASH_TARGET_EXISTS" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "MOVE_FAILED" | "TRASH_FAILED" | "RESTORE_FAILED" | "COPY_FAILED" | CommitTokenErrorCode;
   category: ObsidianManageErrorCategory;
   message: string;
   recoverable: boolean;
@@ -173,7 +176,7 @@ export interface ManageLinkImpact {
   degradedSignals?: string[] | undefined;
 }
 
-export interface ObsidianManageOutput {
+export interface ObsidianManageOutput extends CommitTokenMetadata {
   tool: "obsidian_manage";
   status: ObsidianManageStatus;
   operation?: string | undefined;

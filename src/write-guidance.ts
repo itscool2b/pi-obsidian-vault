@@ -12,8 +12,9 @@ export function normalizeOperation(value: string | undefined): { operation?: Obs
   return { requested, forbidden };
 }
 
-export function contentSummary(raw: string): { raw: string; chars: number; bytes: number; preview: string; previewTruncated: boolean } {
-  const preview = clip(raw, PREVIEW_CHARS);
+export function contentSummary(raw: string, maxPreviewChars = PREVIEW_CHARS): { raw: string; chars: number; bytes: number; preview: string; previewTruncated: boolean } {
+  const limit = Math.max(1, Math.min(PREVIEW_CHARS, maxPreviewChars));
+  const preview = clip(raw, limit);
   return {
     raw,
     chars: raw.length,
@@ -76,6 +77,11 @@ export function makeOutput(input: {
   error?: ObsidianWriteError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianWriteNextAction[] | undefined;
+  tokenRequired?: boolean | undefined;
+  confirmationToken?: string | undefined;
+  tokenTtlSeconds?: number | undefined;
+  tokenExpiresAt?: string | undefined;
+  tokenPolicy?: ObsidianWriteOutput["tokenPolicy"];
 }): ObsidianWriteOutput {
   const output: ObsidianWriteOutput = {
     tool: "obsidian_write",
@@ -92,6 +98,11 @@ export function makeOutput(input: {
   if (input.preview) output.preview = input.preview;
   if (input.validation) output.validation = input.validation;
   if (input.error) output.error = input.error;
+  if (input.tokenRequired !== undefined) output.tokenRequired = input.tokenRequired;
+  if (input.confirmationToken) output.confirmationToken = input.confirmationToken;
+  if (input.tokenTtlSeconds !== undefined) output.tokenTtlSeconds = input.tokenTtlSeconds;
+  if (input.tokenExpiresAt) output.tokenExpiresAt = input.tokenExpiresAt;
+  if (input.tokenPolicy) output.tokenPolicy = input.tokenPolicy;
   return output;
 }
 
@@ -103,8 +114,8 @@ export function nextActionsFor(status: ObsidianWriteStatus, operation: string | 
       if (safeOperation) params.operation = safeOperation;
       if (path) params.path = path;
       const label = safeOperation === "create_folder"
-        ? "Ask the user to confirm, then retry obsidian_write with dryRun=false and the same explicit folder path."
-        : "Ask the user to confirm, then retry obsidian_write with dryRun=false and the same explicit path/content.";
+        ? "Ask the user to confirm, then retry obsidian_write with dryRun=false, the same explicit folder path, and the returned confirmationToken when present."
+        : "Ask the user to confirm, then retry obsidian_write with dryRun=false, the same explicit path/content, and the returned confirmationToken when present.";
       return [{ priority: 1, action: "confirm_preview", label, params }];
     }
     case "success":

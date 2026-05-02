@@ -23,7 +23,8 @@ export function makeEditError(code: ObsidianEditError["code"], category: Obsidia
   return error;
 }
 
-export function buildEditPreview(operation: ObsidianEditOperation, path: string, transform: EditTransformResult, bytesAfter: number): EditPreview {
+export function buildEditPreview(operation: ObsidianEditOperation, path: string, transform: EditTransformResult, bytesAfter: number, maxPreviewChars = PREVIEW_CHARS): EditPreview {
+  const limit = Math.max(1, Math.min(PREVIEW_CHARS, maxPreviewChars));
   const preview: EditPreview = {
     operation,
     path,
@@ -33,19 +34,44 @@ export function buildEditPreview(operation: ObsidianEditOperation, path: string,
   };
   if (transform.heading) preview.heading = transform.heading;
   if (transform.property) preview.property = transform.property;
-  if (transform.beforePreview !== undefined) preview.beforePreview = transform.beforePreview;
-  if (transform.afterPreview !== undefined) preview.afterPreview = transform.afterPreview;
-  if (transform.insertedPreview !== undefined) preview.insertedPreview = transform.insertedPreview;
+  let truncatedByLimit = false;
+  if (transform.beforePreview !== undefined) {
+    const clipped = clipEditPreview(transform.beforePreview, limit);
+    preview.beforePreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
+  if (transform.afterPreview !== undefined) {
+    const clipped = clipEditPreview(transform.afterPreview, limit);
+    preview.afterPreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
+  if (transform.insertedPreview !== undefined) {
+    const clipped = clipEditPreview(transform.insertedPreview, limit);
+    preview.insertedPreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
   if (transform.contentChars !== undefined) preview.contentChars = transform.contentChars;
-  if (transform.valuePreview !== undefined) preview.valuePreview = transform.valuePreview;
+  if (transform.valuePreview !== undefined) {
+    const clipped = clipEditPreview(transform.valuePreview, limit);
+    preview.valuePreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
   if (transform.valueType !== undefined) preview.valueType = transform.valueType;
-  if (transform.oldTextPreview !== undefined) preview.oldTextPreview = transform.oldTextPreview;
-  if (transform.newTextPreview !== undefined) preview.newTextPreview = transform.newTextPreview;
+  if (transform.oldTextPreview !== undefined) {
+    const clipped = clipEditPreview(transform.oldTextPreview, limit);
+    preview.oldTextPreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
+  if (transform.newTextPreview !== undefined) {
+    const clipped = clipEditPreview(transform.newTextPreview, limit);
+    preview.newTextPreview = clipped.preview;
+    truncatedByLimit ||= clipped.truncated;
+  }
   if (transform.oldTextChars !== undefined) preview.oldTextChars = transform.oldTextChars;
   if (transform.newTextChars !== undefined) preview.newTextChars = transform.newTextChars;
   if (transform.changedChars !== undefined) preview.changedChars = transform.changedChars;
   if (transform.changedBytes !== undefined) preview.changedBytes = transform.changedBytes;
-  if (transform.previewTruncated !== undefined) preview.previewTruncated = transform.previewTruncated;
+  if (transform.previewTruncated !== undefined || truncatedByLimit) preview.previewTruncated = Boolean(transform.previewTruncated || truncatedByLimit);
   if (transform.bodyPreserved !== undefined) preview.bodyPreserved = transform.bodyPreserved;
   return preview;
 }
@@ -62,6 +88,11 @@ export function makeEditOutput(input: {
   error?: ObsidianEditError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianEditNextAction[] | undefined;
+  tokenRequired?: boolean | undefined;
+  confirmationToken?: string | undefined;
+  tokenTtlSeconds?: number | undefined;
+  tokenExpiresAt?: string | undefined;
+  tokenPolicy?: ObsidianEditOutput["tokenPolicy"];
 }): ObsidianEditOutput {
   const output: ObsidianEditOutput = {
     tool: "obsidian_edit",
@@ -77,6 +108,11 @@ export function makeEditOutput(input: {
   if (input.target) output.target = input.target;
   if (input.preview) output.preview = input.preview;
   if (input.error) output.error = input.error;
+  if (input.tokenRequired !== undefined) output.tokenRequired = input.tokenRequired;
+  if (input.confirmationToken) output.confirmationToken = input.confirmationToken;
+  if (input.tokenTtlSeconds !== undefined) output.tokenTtlSeconds = input.tokenTtlSeconds;
+  if (input.tokenExpiresAt) output.tokenExpiresAt = input.tokenExpiresAt;
+  if (input.tokenPolicy) output.tokenPolicy = input.tokenPolicy;
   return output;
 }
 
@@ -89,7 +125,7 @@ export function nextActionsFor(status: ObsidianEditStatus, operation: string | u
       if (path) params.path = path;
       if (target?.heading) params.heading = `${"#".repeat(target.heading.level)} ${target.heading.text}`;
       if (target?.property) params.property = target.property.name;
-      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_edit with dryRun=false and the same explicit path and target fields.", params }];
+      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_edit with dryRun=false, the same explicit path and target fields, and the returned confirmationToken when present.", params }];
     }
     case "success":
       return [{ priority: 1, action: "answer_success", label: "Tell the user the structured edit completed and cite the vault-relative note path." }];

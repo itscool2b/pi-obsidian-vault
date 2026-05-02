@@ -1,3 +1,5 @@
+import { defaultCommitTokenService, DISABLED_COMMIT_TOKEN_POLICY, hashTokenField, isCommitTokenRequired, tokenFailureMessage } from "./commit-token.js";
+import type { CommitTokenBinding, CommitTokenMetadata, CommitTokenPolicy, CommitTokenService } from "./commit-token-types.js";
 import { buildEditPreview, makeEditError, makeEditOutput, normalizeEditOperation } from "./edit-guidance.js";
 import { ExactTextEditError, planExactTextTransform } from "./exact-text-editor.js";
 import { FrontmatterEditError, planRemoveFrontmatter, planUpdateFrontmatter } from "./frontmatter-editor.js";
@@ -8,6 +10,9 @@ import type { EditTransformResult, ObsidianEditError, ObsidianEditOperation, Obs
 export interface ObsidianEditOptions {
   vaultRoot?: string | undefined;
   editor?: LocalVaultEditor | undefined;
+  tokenPolicy?: CommitTokenPolicy | undefined;
+  tokenService?: CommitTokenService | undefined;
+  maxPreviewChars?: number | undefined;
 }
 
 export async function obsidianEdit(request: ObsidianEditRequest, options: ObsidianEditOptions = {}): Promise<ObsidianEditOutput> {
@@ -80,11 +85,16 @@ export async function obsidianEdit(request: ObsidianEditRequest, options: Obsidi
     });
   }
 
+  const policy = options.tokenPolicy ?? DISABLED_COMMIT_TOKEN_POLICY;
+  const tokenRequired = isCommitTokenRequired(policy, "obsidian_edit", op.operation);
+  const tokenService = options.tokenService ?? defaultCommitTokenService();
+  const tokenBinding = buildEditTokenBinding(policy, op.operation, safePath, request);
   const transform = (content: string): EditTransformResult => buildTransform(op.operation!, request, content);
   try {
     if (dryRun) {
       const result = await editor.preview(safePath, transform);
-      const preview = buildEditPreview(op.operation, safePath, result.transform, result.target.bytesAfter ?? Buffer.byteLength(result.transform.contentAfter, "utf8"));
+      const preview = buildEditPreview(op.operation, safePath, result.transform, result.target.bytesAfter ?? Buffer.byteLength(result.transform.contentAfter, "utf8"), options.maxPreviewChars);
+      const token = tokenMetadataForPreview(tokenRequired, tokenService, tokenBinding, policy);
       return makeEditOutput({
         status: "preview",
         operation: op.operation,
@@ -94,12 +104,33 @@ export async function obsidianEdit(request: ObsidianEditRequest, options: Obsidi
         message: `Dry-run preview: obsidian_edit would ${op.operation} ${safePath}.`,
         target: result.target,
         preview,
+        ...token.metadata,
+        warnings: token.warnings,
       });
+    }
+
+    if (tokenRequired) {
+      const verified = tokenService.verify(request.confirmationToken, tokenBinding, policy);
+      if (!verified.ok) {
+        return makeEditOutput({
+          status: "safety_refusal",
+          operation: op.operation,
+          path: safePath,
+          dryRun,
+          committed: false,
+          message: verified.message,
+          error: makeEditError(verified.code, "safety", tokenFailureMessage(verified.code)),
+          warnings: ["Token-required edit commit was refused before mutation; re-run dryRun=true and retry with the returned confirmationToken."],
+          tokenRequired: true,
+          tokenTtlSeconds: policy.ttlSeconds,
+          tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
+        });
+      }
     }
 
     const result = await editor.commit(safePath, transform);
     const preview = op.operation === "replace_exact_text"
-      ? buildEditPreview(op.operation, safePath, result.transform, result.target.bytesAfter ?? Buffer.byteLength(result.transform.contentAfter, "utf8"))
+      ? buildEditPreview(op.operation, safePath, result.transform, result.target.bytesAfter ?? Buffer.byteLength(result.transform.contentAfter, "utf8"), options.maxPreviewChars)
       : undefined;
     return makeEditOutput({
       status: "success",
@@ -233,4 +264,46 @@ function notFound(operation: ObsidianEditOperation, path: string, dryRun: boolea
 
 function ambiguous(operation: ObsidianEditOperation, path: string, dryRun: boolean, code: ObsidianEditError["code"], message: string, details?: Record<string, unknown> | undefined): ObsidianEditOutput {
   return makeEditOutput({ status: "ambiguous", operation, path, dryRun, message, error: makeEditError(code, "ambiguous", message, true, details), warnings: ["Ambiguous target refused; no note was changed."] });
+}
+
+function buildEditTokenBinding(policy: CommitTokenPolicy, operation: ObsidianEditOperation, safePath: string, request: ObsidianEditRequest): CommitTokenBinding {
+  const binding: CommitTokenBinding = {
+    tool: "obsidian_edit",
+    operation,
+    policyVersion: policy.policyVersion,
+    requirementMode: policy.requirementMode,
+    path: safePath,
+  };
+  if (request.heading !== undefined) binding.heading = request.heading;
+  if (request.content !== undefined) {
+    binding.contentHash = hashTokenField(request.content);
+    binding.contentLength = request.content.length;
+  }
+  if (request.property !== undefined) binding.property = request.property;
+  if (Object.prototype.hasOwnProperty.call(request, "value")) binding.valueHash = hashTokenField(request.value);
+  if (request.oldText !== undefined) {
+    binding.oldTextHash = hashTokenField(request.oldText);
+    binding.oldTextLength = request.oldText.length;
+  }
+  if (request.newText !== undefined) {
+    binding.newTextHash = hashTokenField(request.newText);
+    binding.newTextLength = request.newText.length;
+  }
+  return binding;
+}
+
+function tokenMetadataForPreview(tokenRequired: boolean, tokenService: CommitTokenService, binding: CommitTokenBinding, policy: CommitTokenPolicy): { metadata: CommitTokenMetadata; warnings: string[] } {
+  if (!tokenRequired) return { metadata: { tokenRequired: false }, warnings: [] };
+  const issued = tokenService.issue(binding, policy);
+  if (!issued.ok) {
+    return {
+      metadata: {
+        tokenRequired: true,
+        tokenTtlSeconds: policy.ttlSeconds,
+        tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
+      },
+      warnings: ["Confirmation token setup is unavailable; this dry-run stayed non-mutating, but the matching commit will be refused until token support is available."],
+    };
+  }
+  return { metadata: issued.metadata, warnings: [] };
 }

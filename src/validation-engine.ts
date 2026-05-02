@@ -4,6 +4,7 @@ import type { ObsidianValidateOutput, ObsidianValidateRequest, ValidationChecked
 
 export interface ObsidianValidateOptions {
   defaultBudget?: BudgetProfile | undefined;
+  defaultMaxIssues?: number | undefined;
   setupErrors?: string[] | undefined;
   setupWarnings?: string[] | undefined;
 }
@@ -11,7 +12,7 @@ export interface ObsidianValidateOptions {
 export async function obsidianValidate(backend: ObsidianCliBackend | undefined, request: ObsidianValidateRequest, options: ObsidianValidateOptions = {}): Promise<ObsidianValidateOutput> {
   const target = normalizeTarget(request.target);
   const budget = request.budget ?? options.defaultBudget ?? "standard";
-  const maxIssues = normalizeValidationMaxIssues(request.maxIssues);
+  const maxIssues = normalizeValidationMaxIssues(request.maxIssues ?? options.defaultMaxIssues);
   if (!maxIssues.ok) {
     return emptyValidationOutput({ status: "validation_error", target: target.value, checkedScope: checkedScopeFor(target.value), error: maxIssues.error, warnings: [maxIssues.warning], action: retryActionFor(target.value) });
   }

@@ -181,6 +181,11 @@ export function makeManageOutput(input: {
   error?: ObsidianManageError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianManageNextAction[] | undefined;
+  tokenRequired?: boolean | undefined;
+  confirmationToken?: string | undefined;
+  tokenTtlSeconds?: number | undefined;
+  tokenExpiresAt?: string | undefined;
+  tokenPolicy?: ObsidianManageOutput["tokenPolicy"];
 }): ObsidianManageOutput {
   const output: ObsidianManageOutput = {
     tool: "obsidian_manage",
@@ -211,6 +216,11 @@ export function makeManageOutput(input: {
   if (input.linkImpact) output.linkImpact = input.linkImpact;
   if (input.degradedSignals && input.degradedSignals.length > 0) output.degradedSignals = [...new Set(input.degradedSignals)].sort();
   if (input.error) output.error = input.error;
+  if (input.tokenRequired !== undefined) output.tokenRequired = input.tokenRequired;
+  if (input.confirmationToken) output.confirmationToken = input.confirmationToken;
+  if (input.tokenTtlSeconds !== undefined) output.tokenTtlSeconds = input.tokenTtlSeconds;
+  if (input.tokenExpiresAt) output.tokenExpiresAt = input.tokenExpiresAt;
+  if (input.tokenPolicy) output.tokenPolicy = input.tokenPolicy;
   return output;
 }
 
@@ -231,25 +241,25 @@ export function nextActionsFor(input: {
         const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "trash_note", dryRun: false };
         if (path) params.path = path;
         if (trashFolder) params.trashFolder = trashFolder;
-        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit path/trashFolder.", params }];
+        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false, the same explicit path/trashFolder, and the returned confirmationToken.", params }];
       }
       if (operation === "restore_note") {
         const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "restore_note", dryRun: false };
         if (trashPath) params.trashPath = trashPath;
         if (toPath) params.toPath = toPath;
         if (trashFolder) params.trashFolder = trashFolder;
-        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit trashPath/toPath/trashFolder.", params }];
+        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false, the same explicit trashPath/toPath/trashFolder, and the returned confirmationToken.", params }];
       }
       if (operation === "copy_note") {
         const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "copy_note", dryRun: false };
         if (fromPath) params.fromPath = fromPath;
         if (toPath) params.toPath = toPath;
-        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit fromPath/toPath.", params }];
+        return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false, the same explicit fromPath/toPath, and the returned confirmationToken.", params }];
       }
       const params: NonNullable<ObsidianManageNextAction["params"]> = { operation: "move_note", dryRun: false };
       if (fromPath) params.fromPath = fromPath;
       if (toPath) params.toPath = toPath;
-      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false and the same explicit fromPath/toPath.", params }];
+      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_manage with dryRun=false, the same explicit fromPath/toPath, and the returned confirmationToken.", params }];
     }
     case "success":
       return [{ priority: 1, action: "answer_success", label: operation === "trash_note" ? "Tell the user the note was moved to trash and cite only vault-relative source and trash paths." : operation === "restore_note" ? "Tell the user the note was restored and cite only vault-relative trash source and destination paths." : operation === "copy_note" ? "Tell the user the note was copied and cite only the vault-relative source and destination paths." : "Tell the user the note was moved or renamed and cite only the vault-relative source and destination paths." }];

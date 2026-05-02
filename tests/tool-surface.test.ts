@@ -104,7 +104,7 @@ describe("public tool surface", () => {
     const schema = pi.tools.get("obsidian_write").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "content", "dryRun", "operation", "path"]);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
     expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "More", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "create_folder", path: "Projects/New Area", dryRun: false })).toBe(true);
@@ -125,7 +125,7 @@ describe("public tool surface", () => {
     const schema = pi.tools.get("obsidian_edit").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "heading", "newText", "oldText", "operation", "path", "property", "value"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "content", "dryRun", "heading", "newText", "oldText", "operation", "path", "property", "value"]);
     expect(Value.Check(schema, { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New" })).toBe(true);
     expect(Value.Check(schema, { operation: "update_frontmatter", path: "Notes/Existing.md", property: "status", value: "reviewed", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "replace_exact_text", path: "Notes/Existing.md", oldText: "Old", newText: "New", dryRun: false })).toBe(true);
@@ -147,7 +147,7 @@ describe("public tool surface", () => {
     const schema = pi.tools.get("obsidian_manage").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md" })).toBe(true);

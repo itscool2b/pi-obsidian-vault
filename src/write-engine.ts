@@ -1,11 +1,18 @@
+import { defaultCommitTokenService, DISABLED_COMMIT_TOKEN_POLICY, hashTokenField, isCommitTokenRequired, tokenFailureMessage } from "./commit-token.js";
+import type { CommitTokenBinding, CommitTokenMetadata, CommitTokenPolicy, CommitTokenService } from "./commit-token-types.js";
 import { makeError, makeOutput, buildPreview, contentSummary, normalizeOperation } from "./write-guidance.js";
 import { validateMarkdownContent } from "./note-validation.js";
 import { LocalVaultWriter, writeErrorFromUnknown, type VaultWriter } from "./vault-writer.js";
-import type { ObsidianWriteOutput, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
+import type { ObsidianWriteOutput, ObsidianWriteOperation, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
 
 export interface ObsidianWriteOptions {
   vaultRoot?: string | undefined;
   writer?: VaultWriter | undefined;
+  tokenPolicy?: CommitTokenPolicy | undefined;
+  tokenService?: CommitTokenService | undefined;
+  maxPreviewChars?: number | undefined;
+  writeDryRunValidationEnabled?: boolean | undefined;
+  appendDryRunValidationEnabled?: boolean | undefined;
 }
 
 export async function obsidianWrite(request: ObsidianWriteRequest, options: ObsidianWriteOptions = {}): Promise<ObsidianWriteOutput> {
@@ -82,7 +89,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         error: makeError("EMPTY_CONTENT", "validation", "Provide non-empty Markdown content for create or append."),
       });
     }
-    content = contentSummary(request.content);
+    content = contentSummary(request.content, options.maxPreviewChars);
   }
 
   let writer: VaultWriter;
@@ -117,11 +124,17 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
     });
   }
 
+  const policy = options.tokenPolicy ?? DISABLED_COMMIT_TOKEN_POLICY;
+  const tokenRequired = isCommitTokenRequired(policy, "obsidian_write", op.operation);
+  const tokenService = options.tokenService ?? defaultCommitTokenService();
+  const tokenBinding = buildWriteTokenBinding(policy, op.operation, safePath, content);
+
   try {
     if (dryRun) {
       const target = await writer.preview({ operation: op.operation, path: safePath, content });
       const preview = buildPreview(op.operation, safePath, content, target);
-      const validation = content && op.operation !== "create_folder"
+      const shouldValidate = content && op.operation !== "create_folder" && (op.operation === "append" ? options.appendDryRunValidationEnabled !== false : options.writeDryRunValidationEnabled !== false);
+      const validation = shouldValidate && content
         ? validateMarkdownContent(content.raw, {
           expectedPath: safePath,
           checkedScope: op.operation === "append" ? "write_append_content" : "write_create_content",
@@ -129,6 +142,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
           extraDegradedSignals: op.operation === "append" ? ["validation_scope"] : undefined,
         })
         : undefined;
+      const token = tokenMetadataForPreview(tokenRequired, tokenService, tokenBinding, policy);
       return makeOutput({
         status: "preview",
         operation: op.operation,
@@ -139,7 +153,28 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         target,
         preview,
         validation,
+        ...token.metadata,
+        warnings: token.warnings,
       });
+    }
+
+    if (tokenRequired) {
+      const verified = tokenService.verify(request.confirmationToken, tokenBinding, policy);
+      if (!verified.ok) {
+        return makeOutput({
+          status: "safety_refusal",
+          operation: op.operation,
+          path: safePath,
+          dryRun,
+          committed: false,
+          message: verified.message,
+          error: makeError(verified.code, "safety", tokenFailureMessage(verified.code)),
+          warnings: ["Token-required commit was refused before mutation; re-run dryRun=true and retry with the returned confirmationToken."],
+          tokenRequired: true,
+          tokenTtlSeconds: policy.ttlSeconds,
+          tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
+        });
+      }
     }
 
     const target = await writer.commit({ operation: op.operation, path: safePath, content });
@@ -250,4 +285,35 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       warnings: ["No overwrite, delete, rename, move, open, or destructive folder action was attempted."],
     });
   }
+}
+
+function buildWriteTokenBinding(policy: CommitTokenPolicy, operation: ObsidianWriteOperation, safePath: string, content: WriteContentSummary | undefined): CommitTokenBinding {
+  const binding: CommitTokenBinding = {
+    tool: "obsidian_write",
+    operation,
+    policyVersion: policy.policyVersion,
+    requirementMode: policy.requirementMode,
+    path: safePath,
+  };
+  if (content) {
+    binding.contentHash = hashTokenField(content.raw);
+    binding.contentLength = content.chars;
+  }
+  return binding;
+}
+
+function tokenMetadataForPreview(tokenRequired: boolean, tokenService: CommitTokenService, binding: CommitTokenBinding, policy: CommitTokenPolicy): { metadata: CommitTokenMetadata; warnings: string[] } {
+  if (!tokenRequired) return { metadata: { tokenRequired: false }, warnings: [] };
+  const issued = tokenService.issue(binding, policy);
+  if (!issued.ok) {
+    return {
+      metadata: {
+        tokenRequired: true,
+        tokenTtlSeconds: policy.ttlSeconds,
+        tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
+      },
+      warnings: ["Confirmation token setup is unavailable; this dry-run stayed non-mutating, but the matching commit will be refused until token support is available."],
+    };
+  }
+  return { metadata: issued.metadata, warnings: [] };
 }

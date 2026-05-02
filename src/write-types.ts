@@ -1,3 +1,4 @@
+import type { CommitTokenMetadata, CommitTokenErrorCode } from "./commit-token-types.js";
 import type { ValidationMetadata } from "./validation-types.js";
 
 export type ObsidianWriteOperation = "create" | "append" | "create_folder";
@@ -10,6 +11,7 @@ export interface ObsidianWriteRequest {
   path?: string | undefined;
   content?: string | undefined;
   dryRun?: boolean | undefined;
+  confirmationToken?: string | undefined;
 }
 
 export interface WriteTargetSummary {
@@ -41,7 +43,7 @@ export interface WritePreview {
 }
 
 export interface ObsidianWriteError {
-  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_PATH" | "UNSAFE_PATH" | "MISSING_CONTENT" | "EMPTY_CONTENT" | "CONTENT_NOT_ALLOWED" | "TARGET_EXISTS" | "TARGET_MISSING" | "TARGET_FOLDER_EXISTS" | "TARGET_NOT_FOLDER" | "PARENT_NOT_FOLDER" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "WRITE_FAILED";
+  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_PATH" | "UNSAFE_PATH" | "MISSING_CONTENT" | "EMPTY_CONTENT" | "CONTENT_NOT_ALLOWED" | "TARGET_EXISTS" | "TARGET_MISSING" | "TARGET_FOLDER_EXISTS" | "TARGET_NOT_FOLDER" | "PARENT_NOT_FOLDER" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "WRITE_FAILED" | CommitTokenErrorCode;
   category: ObsidianWriteErrorCategory;
   message: string;
   recoverable: boolean;
@@ -58,7 +60,7 @@ export interface ObsidianWriteNextAction {
   } | undefined;
 }
 
-export interface ObsidianWriteOutput {
+export interface ObsidianWriteOutput extends CommitTokenMetadata {
   tool: "obsidian_write";
   status: ObsidianWriteStatus;
   operation?: string | undefined;

@@ -14,7 +14,7 @@ describe("obsidian_write contract", () => {
     const tool = pi.tools.get("obsidian_write");
     const schema = tool.parameters;
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "content", "dryRun", "operation", "path"]);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
     expect(Value.Check(schema, { operation: "create_folder", path: "Projects/New Area" })).toBe(true);
     expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "x", query: "somewhere" })).toBe(false);

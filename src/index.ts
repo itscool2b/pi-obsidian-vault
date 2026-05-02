@@ -2,7 +2,9 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";
-import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusFromConfig, writeStatusFromConfig, type EditVaultStatus, type LoadConfigOptions, type ManageVaultStatus, type VaultConfig, type VaultStatus, type WriteVaultStatus } from "./config.js";
+import { defaultCommitTokenService } from "./commit-token.js";
+import type { CommitTokenService } from "./commit-token-types.js";
+import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusConfigSummary, statusFromConfig, writeStatusFromConfig, type EditVaultStatus, type LoadConfigOptions, type ManageVaultStatus, type VaultConfig, type VaultStatus, type WriteVaultStatus } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
@@ -20,6 +22,8 @@ import type { ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
 export { loadConfig } from "./config.js";
+export * from "./commit-token-types.js";
+export { createCommitTokenPolicy, DefaultCommitTokenService } from "./commit-token.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
 export { obsidianValidate } from "./validation-engine.js";
@@ -36,6 +40,7 @@ export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
   backend?: ObsidianCliBackend | undefined;
+  tokenService?: CommitTokenService | undefined;
 }
 
 export const OBSIDIAN_RETRIEVE_BUDGETS = ["tiny", "standard", "expanded"] as const;
@@ -99,9 +104,10 @@ const ObsidianWriteParams = Type.Object({
   path: Type.Optional(Type.String({ description: "Explicit vault-relative Markdown path for create/append or folder path for create_folder. obsidian_write never infers destinations from query/topic text." })),
   content: Type.Optional(Type.String({ description: "Markdown content to create or append exactly as supplied. Must be non-empty for create/append and must be omitted for create_folder." })),
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes or folders. Set false only after explicit confirmation." })),
+  confirmationToken: Type.Optional(Type.String({ description: "For token-required commits only: confirmation token returned by the matching dry-run preview. Tokens are redacted from status/docs and never inferred." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun. Supported operations: create, append, and create_folder. dryRun defaults to true. Markdown note operations require explicit safe vault-relative .md paths and non-empty content; create_folder requires an explicit safe vault-relative folder path and rejects content with CONTENT_NOT_ALLOWED. No overwrite, delete, trash, restore, rename, move, copy, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
+  description: "obsidian_write arguments. Supported top-level fields only: operation, path, content, dryRun, confirmationToken. Supported operations: create, append, and create_folder. dryRun defaults to true. Markdown note operations require explicit safe vault-relative .md paths and non-empty content; create_folder requires an explicit safe vault-relative folder path and rejects content with CONTENT_NOT_ALLOWED. Token-required commits must reuse the confirmationToken from a matching dry-run preview. No overwrite, delete, trash, restore, rename, move, copy, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 const ObsidianEditParams = Type.Object({
@@ -114,9 +120,10 @@ const ObsidianEditParams = Type.Object({
   oldText: Type.Optional(Type.String({ description: "Non-empty exact text span to replace for replace_exact_text. Matched literally; no regex, fuzzy, semantic, or inferred matching." })),
   newText: Type.Optional(Type.String({ description: "Explicit replacement text for replace_exact_text. May be an empty string when intentionally supplied." })),
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without changing notes. Set false only after explicit confirmation." })),
+  confirmationToken: Type.Optional(Type.String({ description: "For token-required commits only: confirmation token returned by the matching dry-run preview. Tokens are bounded and never inferred." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, trash, restore, copy, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
+  description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun, confirmationToken. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. Token-required commits must reuse the confirmationToken from a matching dry-run preview. No create, full-note overwrite, delete, trash, restore, copy, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
 });
 
 const PlannedOperationParam = Type.Object({
@@ -161,12 +168,14 @@ const ObsidianManageParams = Type.Object({
   trashPath: Type.Optional(Type.String({ description: "For restore_note only: explicit safe vault-relative Markdown source note path inside the selected/default trashFolder. obsidian_manage never infers restore sources." })),
   trashFolder: Type.Optional(Type.String({ description: "For trash_note and restore_note: optional explicit safe vault-relative folder path. Defaults to _Trash when omitted; must not be hidden, .obsidian, root, absolute, traversal, wildcard/bulk-looking, or extension-looking." })),
   dryRun: Type.Optional(Type.Boolean({ description: "When true or omitted, validate and preview without moving, trashing, restoring, or copying anything. Set false only after explicit confirmation." })),
+  confirmationToken: Type.Optional(Type.String({ description: "For token-required commits only: confirmation token returned by the matching dry-run preview. Tokens are bounded and never inferred." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_manage arguments. Supported top-level fields only: operation, fromPath, toPath, path, trashPath, trashFolder, dryRun. Supported operations are exactly move_note, trash_note, restore_note, and copy_note. move_note moves or renames exactly one existing Markdown note from explicit safe fromPath to safe toPath. trash_note recoverably moves exactly one existing Markdown note from explicit path into default _Trash or an explicit safe trashFolder. restore_note restores exactly one Markdown note from explicit trashPath inside the selected/default safe trashFolder to explicit safe toPath. copy_note copies exactly one existing Markdown note byte-for-byte from explicit safe fromPath to explicit safe toPath while leaving the source unchanged. dryRun defaults to true. No permanent delete, folder delete, folder copy, recursive/wildcard/bulk restore/delete/copy, non-Markdown restore/delete/copy, folder moves/restores, overwrite, link rewrite, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
+  description: "obsidian_manage arguments. Supported top-level fields only: operation, fromPath, toPath, path, trashPath, trashFolder, dryRun, confirmationToken. Supported operations are exactly move_note, trash_note, restore_note, and copy_note. move_note moves or renames exactly one existing Markdown note from explicit safe fromPath to safe toPath. trash_note recoverably moves exactly one existing Markdown note from explicit path into configured/default trash folder or an explicit safe trashFolder. restore_note restores exactly one Markdown note from explicit trashPath inside the selected/default safe trashFolder to explicit safe toPath. copy_note copies exactly one existing Markdown note byte-for-byte from explicit safe fromPath to explicit safe toPath while leaving the source unchanged. Token-required commits must reuse the confirmationToken from a matching dry-run preview. dryRun defaults to true. No permanent delete, folder delete, folder copy, recursive/wildcard/bulk restore/delete/copy, non-Markdown restore/delete/copy, folder moves/restores, overwrite, link rewrite, open UI, shell, network, scan, discovery, or arbitrary CLI behavior is supported.",
 });
 
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
+  const tokenService = options.tokenService ?? defaultCommitTokenService();
   pi.registerTool({
     name: "obsidian_retrieve",
     label: "Obsidian Retrieve",
@@ -186,17 +195,18 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     ],
     parameters: ObsidianRetrieveParams,
     async execute(_toolCallId: string, params: RetrievalRequest) {
-      const config = options.backend ? undefined : await loadConfig(options);
-      if (config && config.errors.length > 0) {
+      const config = await loadConfig(options);
+      if (!options.backend && config.errors.length > 0) {
         return toolResponse(setupRequiredResponse(params, config, config.errors));
       }
-      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config?.cliPath, vaultTarget: config?.vaultTarget, cwd: config?.vaultRoot, timeoutMs: config?.cliTimeoutMs, autoLaunch: config?.autoLaunch, launchWaitMs: config?.launchWaitMs, obsidianAppPath: config?.obsidianAppPath });
-      const health = await backend.checkHealth({ allowAutoLaunch: config?.autoLaunch ?? false });
+      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: config.autoLaunch, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
+      const health = await backend.checkHealth({ allowAutoLaunch: config.autoLaunch });
       if (!health.available) {
-        const errors = [...(config?.errors ?? []), ...health.errors, "Obsidian retrieval is unavailable. Open Obsidian manually, then retry."];
+        const errors = [...(!options.backend ? config.errors : []), ...health.errors, "Obsidian retrieval is unavailable. Open Obsidian manually, then retry."];
         return toolResponse(setupRequiredResponse(params, config, errors, health.warnings));
       }
-      const result = await obsidianRetrieve(backend, params, { defaultBudget: config?.defaultBudget as BudgetProfile | undefined, budgetChars: config?.budgetChars });
+      const retrieveDefaultBudget = (params.mode === "relationships" ? config.defaultRelationshipBudget : config.defaultRetrieveBudget) as BudgetProfile | undefined;
+      const result = await obsidianRetrieve(backend, params, { defaultBudget: retrieveDefaultBudget, budgetChars: config.budgetChars });
       return toolResponse(result);
     },
   });
@@ -220,23 +230,24 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     parameters: ObsidianValidateParams,
     async execute(_toolCallId: string, params: ObsidianValidateRequest) {
       if (params.target !== "existing_note") {
-        const result = await obsidianValidate(undefined, params);
+        const config = await loadConfig(options);
+        const result = await obsidianValidate(undefined, params, { defaultBudget: config.defaultRetrieveBudget as BudgetProfile | undefined, defaultMaxIssues: config.maxValidationIssues });
         return toolResponse(result);
       }
       const preflight = await obsidianValidate(undefined, params, { setupErrors: ["Validation preflight completed without configured note access."] });
       if (preflight.status !== "setup_required") return toolResponse(preflight);
-      const config = options.backend ? undefined : await loadConfig(options);
-      if (config && config.errors.length > 0) {
-        const result = await obsidianValidate(undefined, params, { defaultBudget: config.defaultBudget as BudgetProfile | undefined, setupErrors: config.errors });
+      const config = await loadConfig(options);
+      if (!options.backend && config.errors.length > 0) {
+        const result = await obsidianValidate(undefined, params, { defaultBudget: config.defaultRetrieveBudget as BudgetProfile | undefined, defaultMaxIssues: config.maxValidationIssues, setupErrors: config.errors });
         return toolResponse(result);
       }
-      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config?.cliPath, vaultTarget: config?.vaultTarget, cwd: config?.vaultRoot, timeoutMs: config?.cliTimeoutMs, autoLaunch: config?.autoLaunch, launchWaitMs: config?.launchWaitMs, obsidianAppPath: config?.obsidianAppPath });
-      const health = await backend.checkHealth({ allowAutoLaunch: config?.autoLaunch ?? false });
+      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: config.autoLaunch, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
+      const health = await backend.checkHealth({ allowAutoLaunch: config.autoLaunch });
       if (!health.available) {
-        const errors = [...(config?.errors ?? []), ...health.errors, "Obsidian validation is unavailable. Open Obsidian manually, then retry existing-note validation."];
+        const errors = [...(!options.backend ? config.errors : []), ...health.errors, "Obsidian validation is unavailable. Open Obsidian manually, then retry existing-note validation."];
         return toolResponse(setupRequiredValidationResponse(params, errors, health.warnings, preflight.path));
       }
-      const result = await obsidianValidate(backend, params, { defaultBudget: config?.defaultBudget as BudgetProfile | undefined });
+      const result = await obsidianValidate(backend, params, { defaultBudget: config.defaultRetrieveBudget as BudgetProfile | undefined, defaultMaxIssues: config.maxValidationIssues });
       return toolResponse(result);
     },
   });
@@ -269,7 +280,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     promptSnippet: "Use obsidian_write only for explicit safe Markdown create/append or folder create_folder requests. Prefer dryRun=true previews before committing with dryRun=false.",
     promptGuidelines: [
       "Use obsidian_write only when the user wants to create a new Markdown note, append to an existing Markdown note, or create an explicit safe vault-relative folder.",
-      "Use obsidian_write with dryRun=true or omitted to preview writes/folder creation; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "Use obsidian_write with dryRun=true or omitted to preview writes/folder creation; set dryRun=false only after explicit user confirmation or clear instruction to commit. If the preview returns confirmationToken, pass that exact token on the matching dryRun=false request.",
       "For Markdown notes, obsidian_write requires operation=create or operation=append, an explicit safe vault-relative .md path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
       "For folders, obsidian_write requires operation=create_folder and an explicit safe vault-relative folder path; omit content, because supplied content is rejected with CONTENT_NOT_ALLOWED and no file is created or modified.",
       "obsidian_write appends Markdown exactly as supplied for append; include desired leading newlines, headings, or separators in content.",
@@ -280,7 +291,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     parameters: ObsidianWriteParams,
     async execute(_toolCallId: string, params: ObsidianWriteRequest) {
       const config = await loadConfig(options);
-      const result = await obsidianWrite(params, { vaultRoot: config.vaultRoot });
+      const result = await obsidianWrite(params, { vaultRoot: config.vaultRoot, tokenPolicy: config.commitTokenPolicy, tokenService, maxPreviewChars: config.maxPreviewChars, writeDryRunValidationEnabled: config.writeDryRunValidationEnabled, appendDryRunValidationEnabled: config.appendDryRunValidationEnabled });
       return toolResponse(result);
     },
   });
@@ -292,7 +303,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     promptSnippet: "Use obsidian_edit only for explicit safe structured edits to existing Markdown notes. Prefer dryRun=true previews before committing with dryRun=false.",
     promptGuidelines: [
       "Use obsidian_edit only when the user wants to edit an existing Markdown note at an explicit safe vault-relative .md path.",
-      "Use obsidian_edit with dryRun=true or omitted to preview structured edits; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "Use obsidian_edit with dryRun=true or omitted to preview structured edits; set dryRun=false only after explicit user confirmation or clear instruction to commit. For token-required edits, pass the exact confirmationToken returned by the matching dry-run preview.",
       "obsidian_edit requires operation, path, and operation-specific fields: heading/content for replace_section or insert_under_heading; property/value for update_frontmatter; property for remove_frontmatter; oldText/newText for replace_exact_text.",
       "For replace_exact_text, oldText must match exactly once with no regex, fuzzy, semantic, normalized, or inferred matching; duplicate or missing oldText fails without mutation.",
       "Section headings must be exact ATX Markdown headings such as ## Plan; duplicate matching headings return ambiguity and must not be resolved automatically.",
@@ -303,7 +314,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     parameters: ObsidianEditParams,
     async execute(_toolCallId: string, params: ObsidianEditRequest) {
       const config = await loadConfig(options);
-      const result = await obsidianEdit(params, { vaultRoot: config.vaultRoot });
+      const result = await obsidianEdit(params, { vaultRoot: config.vaultRoot, tokenPolicy: config.commitTokenPolicy, tokenService, maxPreviewChars: config.maxPreviewChars });
       return toolResponse(result);
     },
   });
@@ -316,7 +327,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     promptGuidelines: [
       "Use obsidian_manage only when the user wants to move/rename exactly one existing Markdown note from explicit safe vault-relative fromPath to toPath, recoverably trash exactly one Markdown note from explicit safe path, restore exactly one Markdown note from explicit safe trashPath inside trashFolder to explicit safe toPath, or copy exactly one existing Markdown note from explicit safe fromPath to explicit safe toPath.",
       "obsidian_manage supports only operation=move_note, operation=trash_note, operation=restore_note, and operation=copy_note. Do not use it for permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, multi-note moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, discovery, or arbitrary commands.",
-      "Use obsidian_manage with dryRun=true or omitted to preview; set dryRun=false only after explicit user confirmation or clear instruction to commit.",
+      "Use obsidian_manage with dryRun=true or omitted to preview; set dryRun=false only after explicit user confirmation or clear instruction to commit. Pass the exact confirmationToken returned by the matching dry-run preview for all default management commits.",
       "move_note requires fromPath and toPath to be different safe vault-relative .md paths. The source note must already exist, the destination must not exist, and the destination parent folder must already exist.",
       "trash_note requires path to be an explicit safe vault-relative .md note path. Optional trashFolder must be an explicit safe vault-relative folder path; when omitted it defaults to _Trash.",
       "trash_note creates the safe trash folder only when committed with dryRun=false, moves exactly one Markdown note to the computed trash path, and returns conflict/TRASH_TARGET_EXISTS without overwrite, suffixing, or auto-rename if the target already exists.",
@@ -331,7 +342,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     parameters: ObsidianManageParams,
     async execute(_toolCallId: string, params: ObsidianManageRequest) {
       const config = await loadConfig(options);
-      const result = await obsidianManage(params, { vaultRoot: config.vaultRoot });
+      const result = await obsidianManage(params, { vaultRoot: config.vaultRoot, tokenPolicy: config.commitTokenPolicy, tokenService, defaultTrashFolder: config.defaultTrashFolder });
       return toolResponse(result);
     },
   });
@@ -346,6 +357,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       const editStatus = config ? await editStatusFromConfig(config) : undefined;
       const manageStatus = config ? await manageStatusFromConfig(config) : undefined;
       const health = await backend.checkHealth({ allowAutoLaunch: false });
+      const configSummary = statusConfigSummary(config, tokenService.isAvailable());
       const extraSensitivePaths = [health.cliPath, options.configPath].filter((value): value is string => Boolean(value));
       const capabilities = buildCapabilityRows({ health, status, writeStatus, editStatus, manageStatus, hasInjectedBackend: Boolean(options.backend) });
       const lines = [
@@ -360,10 +372,13 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       if (editStatus) lines.push(`obsidian_edit: ${editStatus.status}`);
       if (manageStatus) lines.push(`obsidian_manage: ${manageStatus.status}`);
       if (capabilities.some((capability) => capability.name === "plan")) lines.push(`obsidian_plan: ${capabilities.find((capability) => capability.name === "plan")?.state ?? "unavailable"}`);
+      lines.push(`Commit tokens: ${configSummary.tokenSupport} (${configSummary.tokenRequirementMode}, ttl ${configSummary.tokenTtlSeconds}s)`);
+      lines.push(`Defaults: retrieveBudget=${configSummary.defaultRetrieveBudget}, relationshipBudget=${configSummary.defaultRelationshipBudget}, maxPreviewChars=${configSummary.maxPreviewChars}, maxValidationIssues=${configSummary.maxValidationIssues}, trashFolder=${configSummary.defaultTrashFolder}`);
+      lines.push(`Dry-run validation: create=${configSummary.writeDryRunValidationEnabled ? "enabled" : "disabled"}, append=${configSummary.appendDryRunValidationEnabled ? "enabled" : "disabled"}`);
       lines.push("", "Capabilities:");
       for (const capability of capabilities) lines.push(`- ${capability.name}: ${capability.state} — ${redactStatusPath(capability.summary, config, extraSensitivePaths)}`);
       for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? []), ...(manageStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
-      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? []), ...(manageStatus?.warnings ?? [])]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
+      for (const warning of [...health.warnings, ...(writeStatus?.warnings ?? []), ...(editStatus?.warnings ?? []), ...(manageStatus?.warnings ?? []), ...configSummary.warnings]) lines.push(`Warning: ${redactStatusPath(warning, config, extraSensitivePaths)}`);
       const allAvailable = capabilities.every((capability) => capability.state === "available");
       ctx.ui.notify(lines.join("\n"), allAvailable ? "info" : "warning");
     },
