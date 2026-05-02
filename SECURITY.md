@@ -6,7 +6,7 @@
 
 | Package | Version |
 | --- | --- |
-| `pi-obsidian-vault` | `0.1.0` |
+| `pi-obsidian-vault` | `0.1.1` |
 
 ## Security model
 

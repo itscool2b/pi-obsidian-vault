@@ -1,6 +1,6 @@
 {
   "name": "pi-obsidian-vault",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Agent-safe Obsidian vault access for Pi: retrieve, validate, plan, and carefully mutate Markdown notes.",
   "license": "MIT",
@@ -39,6 +39,7 @@
   "files": [
     "src/",
     "skills/",
+    "assets/",
     "README.md",
     "LICENSE",
     "CHANGELOG.md",

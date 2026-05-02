@@ -96,7 +96,7 @@ describe("release documentation and skill guidance", () => {
     const expectedInstall = `pi install npm:${packageJson.name}`;
 
     expect(packageJson.name).toBe("pi-obsidian-vault");
-    expect(packageJson.version).toBe("0.1.0");
+    expect(packageJson.version).toBe("0.1.1");
     for (const doc of [readme, changelog, release]) {
       expect(doc).toContain(packageJson.name);
       expect(doc).toContain(packageJson.version);
@@ -109,6 +109,7 @@ describe("release documentation and skill guidance", () => {
   it("covers package landing page sections and avoids unsafe positioning", () => {
     const readme = readText("README.md");
     const requiredSections = [
+      "assets/pi-obsidian-vault-cover.png",
       "# Pi Obsidian Vault",
       "What it is",
       "Why it exists",

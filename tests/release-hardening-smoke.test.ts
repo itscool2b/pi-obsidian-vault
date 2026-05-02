@@ -22,7 +22,7 @@ describe("release hardening temporary-vault smoke", () => {
     };
 
     expect(packageJson.name).toBe("pi-obsidian-vault");
-    expect(packageJson.version).toBe("0.1.0");
+    expect(packageJson.version).toBe("0.1.1");
     expect(Object.hasOwn(packageJson, "private")).toBe(false);
     expect(packageJson.description).toMatch(/Agent-safe Obsidian vault access for Pi/i);
     expect(packageJson.license).toBe("MIT");
@@ -32,7 +32,7 @@ describe("release hardening temporary-vault smoke", () => {
     }
     expect(packageJson.pi?.extensions).toEqual(["./src/index.ts"]);
     expect(packageJson.pi?.skills).toEqual(["./skills/obsidian-research"]);
-    expect(packageJson.files).toEqual(expect.arrayContaining(["src/", "skills/", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "RELEASE.md"]));
+    expect(packageJson.files).toEqual(expect.arrayContaining(["src/", "skills/", "assets/", "README.md", "LICENSE", "CHANGELOG.md", "SECURITY.md", "RELEASE.md"]));
     for (const forbidden of ["specs/", ".specify/", "tests/", "node_modules/", "coverage/"]) {
       expect(packageJson.files).not.toContain(forbidden);
     }

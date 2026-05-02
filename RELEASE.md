@@ -1,16 +1,16 @@
-# Release Checklist: pi-obsidian-vault 0.1.0
+# Release Checklist: pi-obsidian-vault 0.1.1
 
-This checklist is the public-release gate for `pi-obsidian-vault` `0.1.0`.
+This checklist is the public-release gate for `pi-obsidian-vault` `0.1.1`.
 
 ## Package identity
 
 - Package name: `pi-obsidian-vault`
-- Version: `0.1.0`
+- Version: `0.1.1`
 - License: `MIT` (`LICENSE`)
 - Repository: <https://github.com/itscool2b/pi-obsidian-vault>
 - Exact Pi install command: `pi install npm:pi-obsidian-vault`
 - Exact npm publish command: `npm publish`
-- Release branch: `016-create-specification-016`
+- Release branch: `main`
 
 If the package is scoped before publication, update `package.json`, `README.md`, `CHANGELOG.md`, this file, and the final implementation report before publishing.
 
@@ -80,6 +80,7 @@ The `package.json` `files` whitelist includes:
 
 - `src/`
 - `skills/`
+- `assets/`
 - `README.md`
 - `LICENSE`
 - `CHANGELOG.md`
@@ -130,8 +131,8 @@ All commands below were run from `/home/itscool2b/obsidian-extention-pi` on 2026
 | Plan conflicts | `npm test -- plan-conflicts` | PASS — 1 file, 3 tests |
 | Plan output ordering | `npm test -- plan-output-ordering` | PASS — 1 file, 1 test |
 | Plan no mutation | `npm test -- plan-no-mutation` | PASS — 1 file, 1 test |
-| Package dry run | `npm pack --dry-run` | PASS — 52 files, 125.9 kB package size |
-| Package dry run JSON | `npm pack --dry-run --json` | PASS — contents recorded below |
+| Package dry run | `npm pack --dry-run` | PASS — 53 files, 1.3 MB package size |
+| Package dry run JSON | `npm pack --dry-run --json` | PASS — contents recorded below for 0.1.1 |
 
 No focused test aliases were unavailable. Exact focused equivalents run for validation and plan were `validation-tool`, `validation-path-safety`, `plan-preview`, `plan-request-validation`, `plan-path-safety`, `plan-conflicts`, `plan-output-ordering`, and `plan-no-mutation`.
 
@@ -158,7 +159,7 @@ Final dry-run command:
 npm pack --dry-run --json
 ```
 
-Result: `pi-obsidian-vault-0.1.0.tgz`, 52 files, 125.9 kB package size, 624.3 kB unpacked size.
+Result: `pi-obsidian-vault-0.1.1.tgz`, 53 files, 1.3 MB package size, 1.8 MB unpacked size.
 
 ### Last recorded package dry-run contents
 
@@ -168,6 +169,7 @@ LICENSE
 README.md
 RELEASE.md
 SECURITY.md
+assets/pi-obsidian-vault-cover.png
 package.json
 skills/obsidian-research/SKILL.md
 skills/obsidian-research/references/project-index-template.md
@@ -217,7 +219,7 @@ src/write-guidance.ts
 src/write-types.ts
 ```
 
-Package contents include intended source, skill, README, license, changelog, security, release, and package metadata files. Package contents exclude `specs/`, `.specify/`, `tests/`, `node_modules/`, logs, secrets, local config, local vault data, and coverage artifacts.
+Package contents include intended source, skill, README, cover image asset, license, changelog, security, release, and package metadata files. Package contents exclude `specs/`, `.specify/`, `tests/`, `node_modules/`, logs, secrets, local config, local vault data, and coverage artifacts.
 
 ## Release checklist
 
@@ -229,7 +231,7 @@ Package contents include intended source, skill, README, license, changelog, sec
 - [x] README install command is exactly `pi install npm:pi-obsidian-vault`.
 - [x] README includes install, reload/restart, config, env vars, quick start, tool overview, examples, commit-token workflow, security model, limitations, troubleshooting, and release/version info.
 - [x] `SECURITY.md` documents explicit paths, dry-run-first mutations, commit tokens, read-only tools, redaction, unsupported operations, no shell/network expansion except controlled CLI adapter, and reporting guidance.
-- [x] `CHANGELOG.md` includes the initial `0.1.0` public release entry.
+- [x] `CHANGELOG.md` includes the initial `0.1.0` public release entry and the `0.1.1` package-page polish patch entry.
 - [x] Focused no-shell-network, side-effect-refusal, redaction, contract, validation, plan, and status checks pass.
 - [x] `npm run check` passes.
 - [x] `npm pack --dry-run` succeeds.
@@ -268,4 +270,4 @@ The package is publish-ready based on local checks. NPM publication itself remai
    ```
 
 7. Reload or restart Pi and run `/obsidian-vault` with redacted output.
-8. Optionally create a Git tag and GitHub release for `v0.1.0`.
+8. Optionally create a Git tag and GitHub release for `v0.1.1`.

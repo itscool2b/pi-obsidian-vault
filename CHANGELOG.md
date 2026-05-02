@@ -2,6 +2,20 @@
 
 All notable changes to `pi-obsidian-vault` will be documented in this file.
 
+## [0.1.1] - 2026-05-02
+
+Package-page polish patch for GitHub, npm, and pi.dev.
+
+### Changed
+
+- Added the README hero image at `assets/pi-obsidian-vault-cover.png`.
+- Included `assets/` in the npm package files whitelist so the README image ships with the package.
+- Cleaned the README opening and structure while preserving the existing public tool surface, examples, safety posture, and install guidance.
+
+### Safety posture
+
+- Documentation/package polish only; no extension behavior, public tools, mutation operations, or safety semantics changed.
+
 ## [0.1.0] - 2026-05-02
 
 Initial public release for npm/pi.dev.
@@ -39,4 +53,5 @@ Initial public release for npm/pi.dev.
 - Commit tokens are process-local safety confirmations, not long-lived approvals; they expire by TTL or process restart and are not one-time-use in this release.
 - Real-vault checks are opt-in/manual only; committed smoke tests should use temporary or disposable vaults.
 
+[0.1.1]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.1.1
 [0.1.0]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.1.0

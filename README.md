@@ -1,8 +1,18 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/itscool2b/pi-obsidian-vault/main/assets/pi-obsidian-vault-cover.png" alt="Pi Obsidian Vault thumbnail: Pi mascot reaching into an Obsidian vault" width="100%" />
+</p>
+
 # Pi Obsidian Vault
 
-**Agent-safe Obsidian vault access for Pi.** Retrieve, inspect, validate, plan, and carefully mutate Markdown notes without broad vault dumps or unsafe commits.
+**Agent-safe Obsidian vault access for Pi.**
 
-`pi-obsidian-vault` is a Pi coding-agent extension. This is not an Obsidian community plugin. It is **not** a desktop GUI, pane, or automatic vault organizer.
+Retrieve, inspect, validate, plan, and carefully mutate Markdown notes without broad vault dumps, overwrites, recursive operations, or unsafe commits.
+
+```bash
+pi install npm:pi-obsidian-vault
+```
+
+`pi-obsidian-vault` is a Pi coding-agent extension. It is not an Obsidian community plugin, desktop GUI, pane, or automatic vault organizer.
 
 ## What it is
 
@@ -11,9 +21,9 @@ This package registers a small, explicit Pi tool surface for Obsidian vault work
 - `obsidian_retrieve` for candidate-first retrieval, selected context, graph/project summaries, explicit note inspection, and bounded explicit-note relationships.
 - `obsidian_validate` for read-only, workflow-neutral Markdown validation.
 - `obsidian_plan` for read-only operation plan previews that never execute.
-- `obsidian_write` for explicit safe Markdown create/append and explicit safe `create_folder` folder creation.
-- `obsidian_edit` for dry-run-first structured edits to existing Markdown notes.
-- `obsidian_manage` for dry-run-first single-note move, recoverable trash, restore, and byte-for-byte copy.
+- `obsidian_write` for explicit safe Markdown `create`, `append`, and `create_folder` operations.
+- `obsidian_edit` for dry-run-first structured edits to existing Markdown notes: `replace_section`, `insert_under_heading`, `update_frontmatter`, `remove_frontmatter`, and `replace_exact_text`.
+- `obsidian_manage` for dry-run-first single-note `move_note`, `trash_note`, `restore_note`, and `copy_note` operations.
 - `/obsidian-vault` for redacted status and capability output.
 
 ## Why it exists
@@ -25,7 +35,7 @@ Agents need enough vault context to help with notes, but broad vault access and 
 This package does **not** provide or enable:
 
 - Obsidian community plugin UI, GUI panes, UI-open commands, or desktop automation.
-- Broad vault dumps, broad folder dumps, broad vault listing, broad filesystem discovery, or recursive graph crawling.
+- Broad vault dumps, broad folder dumps, broad vault listing, broad filesystem discovery, broad vault scans, broad backlink scans, or recursive graph crawling.
 - Batch execution, transaction commits, staged commits, broad backlink mutation, templates, or automatic vault organization.
 - Permanent delete, destructive folder operations, overwrite, suffixing, auto-renaming, destination inference, or auto path generation.
 - Automatic link rewriting.
@@ -42,6 +52,25 @@ pi install npm:pi-obsidian-vault
 
 If Pi is already running, reload or restart Pi after installation so the package is discovered. In the interactive TUI, use `/reload` when available; otherwise quit and start Pi again.
 
+## Quick start
+
+1. Install the package.
+2. Configure `OBSIDIAN_VAULT_PATH` or `~/.pi/agent/obsidian-vault.json`.
+3. Restart or `/reload` Pi.
+4. Run the side-effect-free status command:
+
+```text
+/obsidian-vault
+```
+
+5. Start with retrieval before any mutation:
+
+```json
+{ "query": "project roadmap", "mode": "search", "budget": "standard" }
+```
+
+The status command reports capability availability and redacted config posture without opening Obsidian or exposing your vault root.
+
 ## Configuration
 
 Supported configuration sources:
@@ -49,7 +78,7 @@ Supported configuration sources:
 1. `~/.pi/agent/obsidian-vault.json`
 2. Environment variables
 
-Local write/edit/manage operations require `vaultPath` / `OBSIDIAN_VAULT_PATH`. Retrieval can also use the configured Obsidian CLI. Tool requests use vault-relative paths such as `Projects/Roadmap.md`; only the configuration value that identifies your local vault root is an absolute local path.
+Local `obsidian_write`, `obsidian_edit`, and `obsidian_manage` operations require `vaultPath` / `OBSIDIAN_VAULT_PATH`. Retrieval can also use the configured Obsidian CLI. Tool requests use vault-relative paths such as `Projects/Roadmap.md`; only the configuration value that identifies your local vault root is an absolute local path.
 
 ### Config file example
 
@@ -109,25 +138,6 @@ OBSIDIAN_APPEND_DRY_RUN_VALIDATION_ENABLED=true
 Advanced retrieval-only vault targeting is also supported through `OBSIDIAN_VAULT_NAME` or `OBSIDIAN_VAULT_ID`, but local mutations still require a local `vaultPath`.
 
 Vault roots, absolute local paths, CLI paths, token internals, lock keys, shell details, network details, and arbitrary local filesystem details are redacted from tool and status output.
-
-## Quick start
-
-1. Install the package.
-2. Configure `OBSIDIAN_VAULT_PATH` or `~/.pi/agent/obsidian-vault.json`.
-3. Restart or `/reload` Pi.
-4. Run:
-
-```text
-/obsidian-vault
-```
-
-The status command is side-effect-free. It reports capability availability and redacted config posture without opening Obsidian or exposing your vault root.
-
-5. Start with retrieval before any mutation:
-
-```json
-{ "query": "project roadmap", "mode": "search", "budget": "standard" }
-```
 
 ## Tool overview
 
@@ -292,7 +302,7 @@ Commit only with the confirmation token returned by that matching dry-run:
 }
 ```
 
-`obsidian_manage` also supports:
+Additional safe manage previews:
 
 ```json
 { "operation": "trash_note", "path": "Projects/New Idea.md", "trashFolder": "_Trash", "dryRun": true }
@@ -331,11 +341,13 @@ Default token-required operations include `obsidian_edit` `replace_section`, `ob
 ## Security model summary
 
 - Local mutations require explicit safe vault-relative paths.
-- Mutations default to dry-run previews.
+- Mutations follow a dry-run-first workflow with previews before commits.
 - Risky commits can require matching confirmation tokens.
 - Read-only tools (`obsidian_retrieve`, `obsidian_validate`, `obsidian_plan`) do not mutate.
 - Outputs are bounded and redacted.
-- There is no permanent delete, overwrite, broad scan, link rewriting, batch execution, transaction commit, UI-open command, or arbitrary shell/network/CLI behavior.
+- No overwrite: create/copy/move/restore refuse existing destinations instead of replacing them.
+- There is no permanent delete, broad scan, link rewriting, batch execution, transaction commit, UI-open command, or arbitrary shell/network/CLI behavior.
+- Release smoke tests use temporary or disposable vaults only. Real-vault evaluation is opt-in/manual only and must preserve no-overwrite, dry-run-first, token, redaction, no-shell/network, and no-broad-scan guarantees.
 
 See [SECURITY.md](./SECURITY.md) for the full security model and reporting guidance.
 
@@ -346,7 +358,7 @@ See [SECURITY.md](./SECURITY.md) for the full security model and reporting guida
 - Backlink information degrades safely when the configured retrieval backend cannot provide targeted metadata.
 - Local write/edit/manage requires a configured local `vaultPath`.
 - Commit tokens are process-local and expire; they are not a long-lived approval mechanism.
-- Real-vault evaluation is opt-in/manual only. Committed smoke tests should use temporary or disposable vaults and preserve no-broad-scan guarantees.
+- Real-vault evaluation is opt-in/manual only. Committed smoke tests should use temporary/disposable vaults and preserve no-broad-scan guarantees.
 
 ## Troubleshooting
 
@@ -380,7 +392,7 @@ This is intentional. Vault roots and absolute local paths are redacted from tool
 
 ## Release/version info
 
-Current public release: `pi-obsidian-vault` `0.1.0`.
+Current public release: `pi-obsidian-vault` `0.1.1`.
 
 Install command:
 
