@@ -59,6 +59,7 @@ describe("obsidian_manage contract", () => {
 
       const commit = await tool.execute("id", { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, target: { sourceExistsAfter: false, destinationExistsAfter: true } });
+      expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
     });
   });
@@ -75,6 +76,7 @@ describe("obsidian_manage contract", () => {
 
       const commit = await tool.execute("id", { operation: "trash_note", path: "Projects/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath: "_Trash/Plan.md", target: { sourceExistsAfter: false, trashTargetExistsAfter: true } });
+      expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
     });
   });
@@ -92,6 +94,7 @@ describe("obsidian_manage contract", () => {
 
       const commit = await tool.execute("id", { operation: "restore_note", trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", target: { trashSourceExistsAfter: false, destinationExistsAfter: true } });
+      expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
     });
   });
@@ -109,6 +112,7 @@ describe("obsidian_manage contract", () => {
 
       const commit = await tool.execute("id", { operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", target: { sourceExistsAfter: true, destinationExistsAfter: true, bytesPreserved: true } });
+      expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
     });
   });

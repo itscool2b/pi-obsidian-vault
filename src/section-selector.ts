@@ -1,14 +1,21 @@
+import { parseMarkdownNote, normalizeHeadingText } from "./note-parser.js";
 import { normalizeVaultRelativePath } from "./path-safety.js";
 import { clip } from "./preview.js";
 import { createQueryProfile, normalizeText, textMatchProfile, tokenize, type QueryProfile } from "./query-profile.js";
-import type { ContextSection, ObsidianCliBackend, RankedCandidate } from "./retrieval-types.js";
+import type { ContextSection, DuplicateHeadingWarning, HeadingContextRef, ObsidianCliBackend, RankedCandidate, SectionSelectionKind } from "./retrieval-types.js";
 
 interface RawSection {
   heading?: string | undefined;
+  headingLevel?: number | undefined;
   startLine: number;
   endLine: number;
   text: string;
+  parentHeadings: HeadingContextRef[];
+  childHeadings: HeadingContextRef[];
+  duplicateHeadingWarning?: DuplicateHeadingWarning | undefined;
 }
+
+type ScoredSection = ContextSection & { startLine: number; endLine: number; text: string; exactHeading: boolean };
 
 export async function selectSectionsForCandidates(
   backend: ObsidianCliBackend,
@@ -23,10 +30,10 @@ export async function selectSectionsForCandidates(
     const note = await backend.read({ path: safePath });
     const sections = splitMarkdownSections(note.content);
     const scored = sections.map((section) => scoreSection(section, profile, candidate));
-    scored.sort((a, b) => b.relevance - a.relevance || a.startLine - b.startLine);
+    const ordered = orderSections(scored);
     const selected: ContextSection[] = [];
     let used = 0;
-    for (const section of scored) {
+    for (const section of ordered) {
       if (selected.length >= options.sectionsPerNote || used >= options.perNoteChars) break;
       const remaining = Math.max(0, Math.min(options.sectionChars, options.perNoteChars - used));
       if (remaining <= 0) break;
@@ -41,6 +48,12 @@ export async function selectSectionsForCandidates(
         truncated: excerpt.length < section.text.replace(/\s+/g, " ").trim().length,
       };
       if (section.heading) context.heading = section.heading;
+      if (section.headingLevel !== undefined) context.headingLevel = section.headingLevel;
+      if (section.selectionKind) context.selectionKind = section.selectionKind;
+      if (section.selectionReason) context.selectionReason = section.selectionReason;
+      if (section.parentHeadings && section.parentHeadings.length > 0) context.parentHeadings = section.parentHeadings;
+      if (section.childHeadings && section.childHeadings.length > 0) context.childHeadings = section.childHeadings;
+      if (section.duplicateHeadingWarning) context.duplicateHeadingWarning = section.duplicateHeadingWarning;
       selected.push(context);
     }
     result.set(candidate.path, selected);
@@ -49,45 +62,50 @@ export async function selectSectionsForCandidates(
 }
 
 export function splitMarkdownSections(content: string): RawSection[] {
-  const lines = content.split(/\r?\n/);
-  const sections: RawSection[] = [];
-  let currentHeading: string | undefined;
-  let startLine = 1;
-  let buffer: string[] = [];
-
-  const flush = (endLine: number) => {
-    const text = buffer.join("\n").trim();
-    if (text) {
-      const section: RawSection = { startLine, endLine, text };
-      if (currentHeading) section.heading = currentHeading;
-      sections.push(section);
-    }
-  };
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index] ?? "";
-    const heading = /^(#{1,6})\s+(.+)$/.exec(line);
-    if (heading) {
-      flush(index);
-      currentHeading = heading[2]?.trim();
-      startLine = index + 1;
-      buffer = [line];
-    } else {
-      buffer.push(line);
-    }
+  const parsed = parseMarkdownNote(content);
+  if (parsed.sections.length > 0) {
+    return parsed.sections.map((section) => {
+      const raw: RawSection = {
+        startLine: section.startLine,
+        endLine: section.endLine,
+        text: section.text,
+        parentHeadings: section.parentHeadings,
+        childHeadings: section.childHeadings,
+      };
+      if (section.heading) raw.heading = section.heading;
+      if (section.headingLevel !== undefined) raw.headingLevel = section.headingLevel;
+      if (section.duplicateHeadingWarning) raw.duplicateHeadingWarning = section.duplicateHeadingWarning;
+      return raw;
+    });
   }
-  flush(lines.length);
-  return sections.length > 0 ? sections : [{ startLine: 1, endLine: lines.length, text: content.trim() }];
+  const lines = content.split(/\r?\n/);
+  return [{ startLine: 1, endLine: lines.length, text: content.trim(), parentHeadings: [], childHeadings: [] }];
 }
 
-function scoreSection(section: RawSection, profile: QueryProfile, candidate: RankedCandidate): ContextSection & { startLine: number; endLine: number; text: string } {
+function orderSections(scored: ScoredSection[]): ScoredSection[] {
+  return [...scored].sort((a, b) => {
+    if (a.exactHeading !== b.exactHeading) return a.exactHeading ? -1 : 1;
+    if (a.exactHeading && b.exactHeading) return a.startLine - b.startLine;
+    return b.relevance - a.relevance || a.startLine - b.startLine || (a.heading ?? "").localeCompare(b.heading ?? "");
+  });
+}
+
+function scoreSection(section: RawSection, profile: QueryProfile, candidate: RankedCandidate): ScoredSection {
   const reasons: string[] = [];
   let relevance = 0;
+  const exactHeading = Boolean(section.heading && exactHeadingMatches(section.heading, profile));
   const headingMatch = section.heading ? textMatchProfile(section.heading, profile, { structured: true, allowFuzzy: false }) : undefined;
   const bodyMatch = textMatchProfile(section.text, profile, { structured: false, allowFuzzy: false });
   const sectionIntent = createSectionIntentProfile(profile);
   const headingIntent = section.heading ? textMatchesSectionIntent(section.heading, sectionIntent) : emptySectionIntentMatch();
   const bodyIntent = textMatchesSectionIntent(section.text, sectionIntent);
+  let selectionKind: SectionSelectionKind = "fallback";
+
+  if (exactHeading && section.heading) {
+    relevance += 100;
+    selectionKind = "exact_heading";
+    reasons.push(`exact heading match: ${section.heading}`);
+  }
 
   if (headingMatch && headingMatch.quality !== "ignored") {
     const points = headingMatch.isGenericOnly
@@ -95,6 +113,7 @@ function scoreSection(section: RawSection, profile: QueryProfile, candidate: Ran
       : headingMatch.quality === "strong" ? 70 : headingMatch.quality === "supporting" ? 45 : 8;
     relevance += points;
     reasons.push(reasonText("heading", headingMatch));
+    if (selectionKind === "fallback") selectionKind = "nearest_relevant";
   }
   if (bodyMatch.quality !== "ignored") {
     const points = bodyMatch.isGenericOnly
@@ -102,14 +121,17 @@ function scoreSection(section: RawSection, profile: QueryProfile, candidate: Ran
       : bodyMatch.quality === "strong" ? 45 : bodyMatch.quality === "supporting" ? 26 : 4;
     relevance += points;
     if (bodyMatch.quality !== "weak" || bodyMatch.matchedTerms.length > 0 || bodyMatch.matchedPhrases.length > 0 || bodyMatch.isGenericOnly) reasons.push(reasonText("section", bodyMatch));
+    if (selectionKind === "fallback" && points > 0) selectionKind = "nearest_relevant";
   }
   if (headingIntent.matched.length > 0) {
     relevance += Math.min(52, 34 + headingIntent.matched.length * 6);
     reasons.push(`heading matches section intent term${headingIntent.matched.length === 1 ? "" : "s"} "${headingIntent.matched.join(", ")}"`);
+    if (selectionKind === "fallback") selectionKind = "nearest_relevant";
   }
   if (bodyIntent.matched.length > 0) {
     relevance += Math.min(30, 14 + bodyIntent.matched.length * 4);
     reasons.push(`section matches section intent term${bodyIntent.matched.length === 1 ? "" : "s"} "${bodyIntent.matched.join(", ")}"`);
+    if (selectionKind === "fallback") selectionKind = "nearest_relevant";
   }
 
   for (const reason of candidate.matchReasons) {
@@ -120,6 +142,7 @@ function scoreSection(section: RawSection, profile: QueryProfile, candidate: Ran
       if (bonus > 0) {
         relevance += bonus;
         reasons.push(`contains ${reason.quality ?? "matching"} ${reason.signal} evidence`);
+        if (selectionKind === "fallback") selectionKind = "candidate_evidence";
       }
     }
   }
@@ -129,16 +152,40 @@ function scoreSection(section: RawSection, profile: QueryProfile, candidate: Ran
     relevance = Math.max(1, Math.round(candidate.confidence * 6));
     reasons.push(profile.isLowSignal ? "weak fallback: query has no meaningful section terms" : "weak fallback: no meaningful query terms matched this section");
   }
-  return {
+  const uniqueReasons = [...new Set(reasons)];
+  const context: ScoredSection = {
     startLine: section.startLine,
     endLine: section.endLine,
-    heading: section.heading,
     relevance: Math.round(relevance),
-    reasons: [...new Set(reasons)],
+    selectionKind,
+    selectionReason: selectionReasonFor(selectionKind, section, uniqueReasons),
+    reasons: uniqueReasons,
     excerpt: "",
     truncated: false,
     text: section.text,
+    exactHeading,
   };
+  if (section.heading) context.heading = section.heading;
+  if (section.headingLevel !== undefined) context.headingLevel = section.headingLevel;
+  if (section.parentHeadings.length > 0) context.parentHeadings = section.parentHeadings;
+  if (section.childHeadings.length > 0) context.childHeadings = section.childHeadings;
+  if (section.duplicateHeadingWarning) context.duplicateHeadingWarning = section.duplicateHeadingWarning;
+  return context;
+}
+
+function exactHeadingMatches(heading: string, profile: QueryProfile): boolean {
+  const normalizedHeading = normalizeHeadingText(heading);
+  if (!normalizedHeading || !profile.normalized) return false;
+  if (normalizedHeading === profile.normalized) return true;
+  return profile.quotedPhrases.some((phrase) => normalizeText(phrase) === normalizedHeading);
+}
+
+function selectionReasonFor(kind: SectionSelectionKind, section: RawSection, reasons: string[]): string {
+  if (kind === "exact_heading" && section.duplicateHeadingWarning) return `Selected as one of multiple exact heading matches for "${section.heading}"; duplicate heading ambiguity is reported.`;
+  if (kind === "exact_heading") return `Selected because the query exactly matched heading "${section.heading}".`;
+  if (kind === "candidate_evidence") return "Selected because candidate evidence falls within this section.";
+  if (kind === "nearest_relevant") return reasons[0] ? `Selected as the nearest relevant section: ${reasons[0]}.` : "Selected as the nearest relevant section.";
+  return reasons[0] ?? "Selected as a bounded fallback section.";
 }
 
 interface SectionIntentProfile {

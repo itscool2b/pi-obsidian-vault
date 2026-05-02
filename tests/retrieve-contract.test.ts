@@ -104,8 +104,9 @@ describe("obsidian_retrieve contract", () => {
     const context = await obsidianRetrieve(backend, { query: "Implementation", mode: "context", selected });
     const graph = await obsidianRetrieve(seededFakeCli(), { query: "Integrated Gradients", mode: "graph" });
     const project = await obsidianRetrieve(seededFakeCli(), { query: "Pi Obsidian Harness", mode: "project", scope: { folder: "Projects" } });
+    const note = await obsidianRetrieve(seededFakeCli(), { mode: "note", path: "Research/Integrated Gradients/index.md" });
 
-    for (const result of [search, context, graph, project]) {
+    for (const result of [search, context, graph, project, note]) {
       expect(result.agentGuidance).toMatchObject({
         resultState: expect.any(String),
         confidence: { level: expect.any(String), ambiguous: expect.any(Boolean), rationale: expect.any(String) },

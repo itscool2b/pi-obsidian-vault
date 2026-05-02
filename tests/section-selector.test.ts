@@ -80,4 +80,54 @@ describe("section selector", () => {
     expect(selected[whatsLeftIndex]?.reasons.join(" ")).toMatch(/generic-term overlap "project"/i);
     expect(selected[whatsLeftIndex]?.reasons.join(" ")).not.toMatch(/section intent|progress|phase|tldr|overview/i);
   });
+
+  it("reports exact heading selections with parent/child context and deterministic explanations", async () => {
+    const backend = seededFakeCli();
+    backend.addNote({
+      path: "Projects/Plan.md",
+      title: "Plan",
+      content: "# Project Plan\n## Overview\nGeneral.\n## Implementation\nDetails.\n### Parser\nParser details.\n### Retrieval\nRetrieval details.\n## Notes\nOther.",
+    });
+    const seed: EnrichedCandidateSeed = {
+      path: "Projects/Plan.md",
+      title: "Plan",
+      evidence: [{ signal: "exact_file", field: "selected", matched: "Projects/Plan.md" }],
+      searchLines: [],
+      sourceCommands: ["selected"],
+      metadata: { headings: [{ text: "Implementation", line: 4 }] },
+    };
+    const ranked = rankCandidates([seed], "Implementation", { maxCandidates: 1, previewChars: 200 });
+    const first = await selectSectionsForCandidates(backend, ranked, "Implementation", { sectionsPerNote: 1, sectionChars: 500, perNoteChars: 500 });
+    const second = await selectSectionsForCandidates(backend, ranked, "Implementation", { sectionsPerNote: 1, sectionChars: 500, perNoteChars: 500 });
+    const section = first.get("Projects/Plan.md")?.[0];
+
+    expect(first).toEqual(second);
+    expect(section).toMatchObject({ heading: "Implementation", headingLevel: 2, selectionKind: "exact_heading", selectionReason: expect.stringMatching(/exactly matched/i) });
+    expect(section?.parentHeadings).toEqual([{ text: "Project Plan", level: 1, line: 1 }]);
+    expect(section?.childHeadings).toEqual([{ text: "Parser", level: 3, line: 6 }, { text: "Retrieval", level: 3, line: 8 }]);
+  });
+
+  it("reports duplicate exact heading ambiguity in document order", async () => {
+    const backend = seededFakeCli();
+    backend.addNote({
+      path: "Projects/Duplicates.md",
+      title: "Duplicates",
+      content: "# Project Plan\n## Goals\nFirst.\n## Notes\nMiddle.\n## Goals\nSecond.",
+    });
+    const seed: EnrichedCandidateSeed = {
+      path: "Projects/Duplicates.md",
+      title: "Duplicates",
+      evidence: [{ signal: "exact_file", field: "selected", matched: "Projects/Duplicates.md" }],
+      searchLines: [],
+      sourceCommands: ["selected"],
+      metadata: { headings: [{ text: "Goals", line: 2 }, { text: "Goals", line: 6 }] },
+    };
+    const ranked = rankCandidates([seed], "Goals", { maxCandidates: 1, previewChars: 200 });
+    const result = await selectSectionsForCandidates(backend, ranked, "Goals", { sectionsPerNote: 2, sectionChars: 500, perNoteChars: 1000 });
+    const selected = result.get("Projects/Duplicates.md") ?? [];
+
+    expect(selected.map((section) => section.heading)).toEqual(["Goals", "Goals"]);
+    expect(selected[0]?.duplicateHeadingWarning).toMatchObject({ heading: "Goals", normalizedHeading: "goals", occurrences: 2, lines: [2, 6] });
+    expect(selected[0]?.selectionReason).toMatch(/ambiguity/i);
+  });
 });

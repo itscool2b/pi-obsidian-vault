@@ -2,6 +2,7 @@ import { collectCandidateSeeds } from "./candidate-collector.js";
 import { budgetForProfile, packCandidateResponse, packContextResponse, packGraphResponse } from "./context-packer.js";
 import { RetrievalError } from "./errors.js";
 import { enrichCandidateMetadata, metadataCoverage } from "./metadata-enricher.js";
+import { inspectNote } from "./note-inspection.js";
 import { normalizeVaultRelativePath } from "./path-safety.js";
 import { rankCandidates } from "./ranker.js";
 import { selectSectionsForCandidates } from "./section-selector.js";
@@ -20,6 +21,14 @@ export async function obsidianRetrieve(backend: ObsidianCliBackend, request: Ret
   const warnings = intentWarnings(request);
   const mode = resolveMode(request);
   const degradedSignals = new Set<DegradedSignal>();
+
+  if (mode === "note") {
+    if (warnings.length > 0) {
+      const result = await inspectNote(backend, request, { defaultBudget: options.defaultBudget, budgetChars: options.budgetChars });
+      return { ...result, warnings: [...new Set([...warnings, ...result.warnings])] };
+    }
+    return inspectNote(backend, request, { defaultBudget: options.defaultBudget, budgetChars: options.budgetChars });
+  }
 
   if ((mode === "search" || mode === "project" || mode === "graph") && !request.query?.trim() && !request.scope?.folder && !request.scope?.recent) {
     throw new RetrievalError("obsidian_retrieve requires a query, folder scope, selected candidate, or recent scope", "INVALID_RETRIEVE_REQUEST");
@@ -64,7 +73,8 @@ export async function obsidianRetrieve(backend: ObsidianCliBackend, request: Ret
   return packCandidateResponse({ mode: "search", query: request.query, candidates: ranked, budget, profile, warnings, degradedSignals: [...degradedSignals] });
 }
 
-function resolveMode(request: RetrievalRequest): "search" | "context" | "graph" | "project" {
+function resolveMode(request: RetrievalRequest): "search" | "context" | "graph" | "project" | "note" {
+  if (request.mode === "note") return "note";
   if (request.mode === "context") return "context";
   if (request.mode === "graph") return "graph";
   if (request.mode === "project") return "project";

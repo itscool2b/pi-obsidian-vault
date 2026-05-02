@@ -47,6 +47,13 @@ describe("obsidian_manage copy_note dry-run previews", () => {
           wouldDeleteSource: false,
           wouldRewriteLinks: false,
         },
+        linkImpact: {
+          sourcePath: "Projects/Plan.md",
+          outgoingWikiLinkCount: 0,
+          outgoingMarkdownLinkCount: 0,
+          hasOutgoingLinks: false,
+          linkRewriteSupported: false,
+        },
       });
       expect(result.nextActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "confirm_preview", params: expect.objectContaining({ operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false }) })]));
       await expectCopyPreviewUnchanged(vaultRoot, "Projects/Plan.md", "Archive/Plan.md", "# Plan\nBody\n");

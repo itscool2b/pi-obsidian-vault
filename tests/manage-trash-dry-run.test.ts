@@ -47,6 +47,13 @@ describe("obsidian_manage trash_note dry-run previews", () => {
           wouldPermanentlyDelete: false,
           wouldRewriteLinks: false,
         },
+        linkImpact: {
+          sourcePath: "Projects/Plan.md",
+          outgoingWikiLinkCount: 0,
+          outgoingMarkdownLinkCount: 0,
+          hasOutgoingLinks: false,
+          linkRewriteSupported: false,
+        },
       });
       expect(result.message).toContain("Projects/Plan.md");
       expect(result.message).toContain("_Trash/Plan.md");

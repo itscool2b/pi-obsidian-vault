@@ -40,6 +40,13 @@ describe("obsidian_manage dry-run previews", () => {
           wouldOverwrite: false,
           wouldRewriteLinks: false,
         },
+        linkImpact: {
+          sourcePath: "Projects/Plan.md",
+          outgoingWikiLinkCount: 0,
+          outgoingMarkdownLinkCount: 0,
+          hasOutgoingLinks: false,
+          linkRewriteSupported: false,
+        },
       });
       expect(result.message).toContain("Projects/Plan.md");
       expect(result.message).toContain("Archive/Plan.md");

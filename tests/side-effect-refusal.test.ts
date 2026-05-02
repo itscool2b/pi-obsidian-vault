@@ -23,6 +23,8 @@ describe("side-effect refusal", () => {
     expect(restoreIntent.warnings.join("\n")).toMatch(/read-only/i);
     const copyIntent = await obsidianRetrieve(seededFakeCli(), { query: "copy integrated gradients note", mode: "search" });
     expect(copyIntent.warnings.join("\n")).toMatch(/read-only/i);
+    const noteIntent = await obsidianRetrieve(seededFakeCli(), { query: "delete note content", mode: "note", path: "Research/Integrated Gradients/index.md" });
+    expect(noteIntent.warnings.join("\n")).toMatch(/read-only/i);
     expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
     expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
   });

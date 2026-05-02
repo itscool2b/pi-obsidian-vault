@@ -38,9 +38,9 @@ describe("public tool surface", () => {
     const schema = tool.parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "explain", "maxCandidates", "mode", "query", "scope", "selected"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "explain", "maxCandidates", "mode", "path", "query", "scope", "selected"]);
     expect(schema.properties.budget.enum).toEqual([...OBSIDIAN_RETRIEVE_BUDGETS]);
-    expect(schema.properties.mode.enum).toEqual(["auto", "search", "context", "graph", "project"]);
+    expect(schema.properties.mode.enum).toEqual(["auto", "search", "context", "graph", "project", "note"]);
     expect(schema.properties.selected.items.additionalProperties).toBe(false);
     expect(schema.properties.scope.additionalProperties).toBe(false);
 
@@ -48,6 +48,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toContain('"mode":"search"');
     expect(surfaceText).toContain('"mode":"graph"');
     expect(surfaceText).toContain('"mode":"context"');
+    expect(surfaceText).toContain('"mode":"note"');
     expect(surfaceText).toContain("tiny, standard, expanded");
     expect(surfaceText).not.toContain('"include"');
   });
@@ -186,6 +187,7 @@ describe("public tool surface", () => {
 
     for (const budget of OBSIDIAN_RETRIEVE_BUDGETS) {
       expect(Value.Check(schema, { query: "integrated gradients", mode: "search", budget })).toBe(true);
+      expect(Value.Check(schema, { mode: "note", path: "Projects/Plan.md", budget })).toBe(true);
     }
     for (const budget of ["small", "large", "deep"]) {
       expect(Value.Check(schema, { query: "integrated gradients", mode: "search", budget })).toBe(false);
@@ -208,6 +210,7 @@ describe("public tool surface", () => {
     expect(docs).toContain('"mode": "search"');
     expect(docs).toContain('"mode": "graph"');
     expect(docs).toContain('"mode": "context"');
+    expect(docs).toContain('"mode": "note"');
     expect(docs).not.toContain('"include"');
   });
 });

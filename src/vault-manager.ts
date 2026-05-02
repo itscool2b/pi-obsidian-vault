@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { access, copyFile, lstat, mkdir, realpath, rename, stat } from "node:fs/promises";
+import { access, copyFile, lstat, mkdir, readFile, realpath, rename, stat } from "node:fs/promises";
 import path from "node:path";
 import { PathSafetyError } from "./errors.js";
 import { normalizeCopyDestinationPath, normalizeCopySourcePath, normalizeRestoreDestinationPath, normalizeRestoreSourcePath, normalizeTrashFolderTarget, normalizeTrashSourcePath, normalizeVaultRelativePath } from "./path-safety.js";
@@ -87,6 +87,7 @@ export interface VaultManager {
   commitRestore(input: VaultRestoreInput): Promise<RestoreTargetSummary>;
   previewCopy(input: VaultCopyInput): Promise<CopyTargetSummary>;
   commitCopy(input: VaultCopyInput): Promise<CopyTargetSummary>;
+  readMarkdownNote(path: string): Promise<string>;
 }
 
 export class LocalVaultManager implements VaultManager {
@@ -124,6 +125,15 @@ export class LocalVaultManager implements VaultManager {
 
   normalizeTrashFolderPath(input: string): string {
     return normalizeTrashFolderTarget(input);
+  }
+
+  async readMarkdownNote(inputPath: string): Promise<string> {
+    const safePath = this.normalizePath(inputPath);
+    const absolutePath = await this.absoluteTargetPath(safePath);
+    const info = await stat(absolutePath).catch(() => undefined);
+    if (!info?.isFile()) throw new VaultManagerMoveError("Source path is not an existing Markdown note file.", info ? "SOURCE_NOT_NOTE" : "SOURCE_NOT_FOUND");
+    await this.assertRealPathContained(absolutePath, "Source note resolves outside the configured vault.");
+    return readFile(absolutePath, "utf8");
   }
 
   async preview(input: VaultMoveInput): Promise<ManageTargetSummary> {

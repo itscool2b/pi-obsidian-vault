@@ -21,9 +21,11 @@ import type {
 } from "./retrieval-types.js";
 
 const AMBIGUITY_MARGIN_THRESHOLD = 0.15;
-const ACTION_ORDER: Record<StructuredAction, number> = {
+const ACTION_ORDER: Record<string, number> = {
   answer: 1,
+  answer_from_metadata: 1,
   request_context: 2,
+  retry_with_path: 2,
   clarify: 3,
   refine_query: 4,
   inspect_alternative: 5,
@@ -292,7 +294,7 @@ function requestContextAction(selected: SelectedCandidateRef[], query: string | 
 }
 
 function sortActions(actions: StructuredNextAction[]): StructuredNextAction[] {
-  return [...actions].sort((a, b) => a.priority - b.priority || ACTION_ORDER[a.action] - ACTION_ORDER[b.action] || a.label.localeCompare(b.label));
+  return [...actions].sort((a, b) => a.priority - b.priority || (ACTION_ORDER[a.action] ?? 99) - (ACTION_ORDER[b.action] ?? 99) || a.label.localeCompare(b.label));
 }
 
 function matchSummaryForCandidate(candidate: RankedCandidate, signalLimit: number): MatchSummary {

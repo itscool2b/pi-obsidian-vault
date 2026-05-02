@@ -62,11 +62,15 @@ export function normalizeVaultFolderTarget(input: string): string {
   return normalized;
 }
 
-export function normalizeTrashSourcePath(input: string): string {
-  assertNoTrashSelectorSyntax(input);
+export function normalizeExplicitMarkdownNotePath(input: string): string {
+  assertNoSelectorSyntax(input);
   const normalized = normalizeVaultRelativePath(input, { allowEmpty: false, requireMarkdown: true });
-  assertNoTrashSelectorSyntax(normalized);
+  assertNoSelectorSyntax(normalized);
   return normalized;
+}
+
+export function normalizeTrashSourcePath(input: string): string {
+  return normalizeExplicitMarkdownNotePath(input);
 }
 
 export function normalizeTrashFolderTarget(input: string): string {
@@ -126,12 +130,16 @@ export function isSafeFolderTargetPath(input: string): boolean {
 }
 
 function assertNoTrashSelectorSyntax(input: string): void {
+  assertNoSelectorSyntax(input);
+}
+
+function assertNoSelectorSyntax(input: string): void {
   const decoded = decodePath(input);
   for (const value of [input, decoded]) {
-    if (/[*?[\]{}]/.test(value)) {
+    if (/[*?[\]{}]/.test(value) || value.includes("**")) {
       throw new PathSafetyError("Wildcard, recursive, or glob-like paths are not allowed", "WILDCARD_PATH");
     }
-    if (value.includes(",")) {
+    if (value.includes(",") || value.includes(";") || /[\r\n]/.test(value) || /\.md\s+\S+\.md(?:$|[?#])/i.test(value)) {
       throw new PathSafetyError("Bulk path lists are not allowed", "BULK_PATH");
     }
   }

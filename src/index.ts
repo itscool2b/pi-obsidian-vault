@@ -30,13 +30,13 @@ export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
 }
 
 export const OBSIDIAN_RETRIEVE_BUDGETS = ["tiny", "standard", "expanded"] as const;
-export const OBSIDIAN_RETRIEVE_MODES = ["auto", "search", "context", "graph", "project"] as const;
+export const OBSIDIAN_RETRIEVE_MODES = ["auto", "search", "context", "graph", "project", "note"] as const;
 
 const Budget = StringEnum(OBSIDIAN_RETRIEVE_BUDGETS, {
   description: "Response budget profile. Valid values: tiny, standard, expanded.",
 });
 const Mode = StringEnum(OBSIDIAN_RETRIEVE_MODES, {
-  description: "Retrieval mode. Valid values: auto, search, context, graph, project.",
+  description: "Retrieval mode. Valid values: auto, search, context, graph, project, note.",
 });
 
 const SelectedRefParam = Type.Object({
@@ -52,8 +52,9 @@ const ScopeParam = Type.Object({
 }, { additionalProperties: false, description: "Optional bounded discovery scope." });
 
 const ObsidianRetrieveParams = Type.Object({
-  query: Type.Optional(Type.String({ description: "Natural-language query, title, alias, tag, property, or project/topic phrase." })),
+  query: Type.Optional(Type.String({ description: "Natural-language query, title, alias, tag, property, or project/topic phrase. For mode=note, this may only guide optional preview/explanation and never infers the path." })),
   mode: Type.Optional(Mode),
+  path: Type.Optional(Type.String({ description: "Only for mode=note: one explicit safe vault-relative Markdown note path to inspect. No absolute, traversal, hidden, .obsidian, wildcard, recursive, bulk/list, folder, or non-Markdown paths." })),
   selected: Type.Optional(Type.Array(SelectedRefParam, { description: "Only for context mode: exact selectedRef objects returned by prior obsidian_retrieve candidates or agentGuidance." })),
   scope: Type.Optional(ScopeParam),
   budget: Type.Optional(Budget),
@@ -61,7 +62,7 @@ const ObsidianRetrieveParams = Type.Object({
   explain: Type.Optional(Type.Boolean({ description: "When true, preserve concise ranking rationale where budget allows." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, selected, scope, budget, maxCandidates, explain. Valid modes: auto, search, context, graph, project. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}.",
+  description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, path, selected, scope, budget, maxCandidates, explain. Valid modes: auto, search, context, graph, project, note. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}.",
 });
 
 const ObsidianWriteParams = Type.Object({
@@ -106,13 +107,14 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_retrieve",
     label: "Obsidian Retrieve",
-    description: "Retrieve ranked Obsidian note candidates, agentGuidance, and bounded selected-note context through the official Obsidian CLI. Read-only and candidate-first. Args: query?: string; mode?: auto|search|context|graph|project; selected?: [{path,title?}]; scope?: {folder?,tags?,properties?,recent?}; budget?: tiny|standard|expanded; maxCandidates?: 1-12; explain?: boolean. Valid examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}.",
-    promptSnippet: "Use obsidian_retrieve first for Obsidian questions. Valid budgets: tiny, standard, expanded. For context, pass mode=context with exact selectedRef paths returned by agentGuidance.",
+    description: "Retrieve ranked Obsidian note candidates, agentGuidance, bounded selected-note context, or one explicit note inspection through the official Obsidian CLI. Read-only and candidate-first except mode=note explicit-path inspection. Args: query?: string; mode?: auto|search|context|graph|project|note; path?: string for mode=note; selected?: [{path,title?}]; scope?: {folder?,tags?,properties?,recent?}; budget?: tiny|standard|expanded; maxCandidates?: 1-12; explain?: boolean. Valid examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}.",
+    promptSnippet: "Use obsidian_retrieve first for Obsidian questions. Valid budgets: tiny, standard, expanded. For explicit note inspection, pass mode=note with one safe vault-relative Markdown path.",
     promptGuidelines: [
-      "Use obsidian_retrieve as the only Obsidian-facing retrieval tool; supported top-level request fields are query, mode, selected, scope, budget, maxCandidates, and explain.",
+      "Use obsidian_retrieve as the only Obsidian-facing retrieval tool; supported top-level request fields are query, mode, path, selected, scope, budget, maxCandidates, and explain.",
       "Use obsidian_retrieve mode=search like {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"} for candidate discovery.",
       "Use obsidian_retrieve mode=graph like {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"} for bounded relationship summaries.",
       "Use obsidian_retrieve mode=context like {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"} only for exact selectedRef paths returned by prior obsidian_retrieve output.",
+      "Use obsidian_retrieve mode=note like {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"} only for explicit safe vault-relative Markdown note inspection; it never dumps full content by default.",
       "Start with candidate discovery; do not ask for broad note, folder, or vault dumps.",
       "Read agentGuidance.resultState, bestMatch, confidence, contextRecommendation, and nextActions before deciding whether to answer or call context mode.",
       "Use obsidian_retrieve mode=project with scope.folder for bounded project summaries; outputs still remain candidate-first.",
@@ -356,7 +358,7 @@ function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | u
 }
 
 function resolveOutputMode(params: RetrievalRequest): ResolvedRetrievalMode {
-  if (params.mode === "context" || params.mode === "graph" || params.mode === "project" || params.mode === "search") return params.mode;
+  if (params.mode === "context" || params.mode === "graph" || params.mode === "project" || params.mode === "search" || params.mode === "note") return params.mode;
   if (params.selected && params.selected.length > 0) return "context";
   if (params.scope?.folder) return "project";
   return "search";

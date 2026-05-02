@@ -49,6 +49,13 @@ describe("obsidian_manage restore_note dry-run previews", () => {
           wouldPermanentlyDelete: false,
           wouldRewriteLinks: false,
         },
+        linkImpact: {
+          sourcePath: "_Trash/Plan.md",
+          outgoingWikiLinkCount: 0,
+          outgoingMarkdownLinkCount: 0,
+          hasOutgoingLinks: false,
+          linkRewriteSupported: false,
+        },
       });
       expect(result.nextActions).toEqual(expect.arrayContaining([expect.objectContaining({ action: "confirm_preview", params: expect.objectContaining({ operation: "restore_note", trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", trashFolder: "_Trash", dryRun: false }) })]));
       await expectRestorePreviewUnchanged(vaultRoot, "_Trash/Plan.md", "Projects/Plan.md", "# Plan\nBody\n");

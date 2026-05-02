@@ -21,6 +21,9 @@ describe("dump prevention", () => {
       { path: "Projects/Pi Obsidian Harness/Architecture.md" },
     ] });
     expect(context.context?.length).toBeLessThanOrEqual(2);
+    expect(context.agentGuidance.contextRecommendation).toMatchObject({ recommended: false, answerScope: "use_returned_context" });
+    expect(context.agentGuidance.contextRecommendation.selected.length).toBeLessThanOrEqual(2);
+    expect(JSON.stringify(context.agentGuidance.contextRecommendation)).not.toContain("Projects/Pi Obsidian Harness/Architecture.md");
     expect(JSON.stringify(context).length).toBeLessThanOrEqual(context.budget.maxChars + 500);
   });
 });

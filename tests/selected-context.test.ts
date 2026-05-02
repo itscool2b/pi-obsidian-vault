@@ -35,4 +35,27 @@ describe("selected-candidate context mode", () => {
     expect(context.context?.[0]?.sections[0]?.heading).toBe("Progress Timeline");
     expect(backend.readPaths()).toEqual(["Projects/Project Narrative.md"]);
   });
+
+  it("preserves parent and child heading context while staying inside budget", async () => {
+    const backend = seededFakeCli();
+    backend.addNote({
+      path: "Projects/Nested.md",
+      title: "Nested",
+      content: "# Project Plan\nIntro.\n## Implementation\nDetails.\n### Parser\nParser details.\n### Retrieval\nRetrieval details.\n## Appendix\nOther.",
+    });
+
+    const context = await obsidianRetrieve(backend, {
+      mode: "context",
+      query: "Implementation",
+      selected: [{ path: "Projects/Nested.md", title: "Nested" }],
+      budget: "tiny",
+    });
+    const section = context.context?.[0]?.sections[0];
+
+    expect(section).toMatchObject({ heading: "Implementation", selectionKind: "exact_heading", selectionReason: expect.stringMatching(/exactly matched/i) });
+    expect(section?.parentHeadings).toEqual([{ text: "Project Plan", level: 1, line: 1 }]);
+    expect(section?.childHeadings).toEqual([{ text: "Parser", level: 3, line: 5 }, { text: "Retrieval", level: 3, line: 7 }]);
+    expect(context.budget.usedChars).toBeLessThanOrEqual(context.budget.maxChars);
+    expect(backend.readPaths()).toEqual(["Projects/Nested.md"]);
+  });
 });

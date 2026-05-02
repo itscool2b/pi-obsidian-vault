@@ -1,7 +1,8 @@
 import { PathSafetyError } from "./errors.js";
-import { buildCopyPreview, buildMovePreview, buildRestorePreview, buildTrashPreview, makeManageError, makeManageOutput, normalizeManageOperation } from "./manage-guidance.js";
+import { buildCopyPreview, buildLinkImpact, buildMovePreview, buildRestorePreview, buildTrashPreview, makeManageError, makeManageOutput, normalizeManageOperation } from "./manage-guidance.js";
+import { parseMarkdownNote, sortDegradedSignals, sortWarnings } from "./note-parser.js";
 import { LocalVaultManager, manageErrorFromUnknown, type VaultManager } from "./vault-manager.js";
-import type { ObsidianManageError, ObsidianManageOutput, ObsidianManageRequest } from "./manage-types.js";
+import type { ObsidianManageError, ObsidianManageOperation, ObsidianManageOutput, ObsidianManageRequest } from "./manage-types.js";
 
 export interface ObsidianManageOptions {
   vaultRoot?: string | undefined;
@@ -44,6 +45,36 @@ export async function obsidianManage(request: ObsidianManageRequest, options: Ob
 
 async function managerFromOptions(options: ObsidianManageOptions): Promise<VaultManager> {
   return options.manager ?? new LocalVaultManager(options.vaultRoot);
+}
+
+async function withLinkImpact(manager: VaultManager, output: ObsidianManageOutput, operation: ObsidianManageOperation, sourcePath: string): Promise<ObsidianManageOutput> {
+  try {
+    const content = await manager.readMarkdownNote(sourcePath);
+    const parsed = parseMarkdownNote(content);
+    const degradedSignals = operation === "copy_note" ? parsed.degradedSignals : sortDegradedSignals([...parsed.degradedSignals, "backlinks", "relationships"]);
+    const linkImpact = buildLinkImpact({
+      operation,
+      sourcePath,
+      outgoingWikiLinkCount: parsed.outgoingWikiLinks.length,
+      outgoingMarkdownLinkCount: parsed.outgoingMarkdownLinks.length,
+      degradedSignals,
+    });
+    const combinedDegradedSignals = [...new Set([...(output.degradedSignals ?? []), ...degradedSignals])].sort();
+    const enriched: ObsidianManageOutput = {
+      ...output,
+      linkImpact,
+      warnings: sortWarnings([...output.warnings, linkImpact.linkImpactWarning]),
+    };
+    if (combinedDegradedSignals.length > 0) enriched.degradedSignals = combinedDegradedSignals;
+    return enriched;
+  } catch {
+    const degradedSignals = sortDegradedSignals(["parsing"]);
+    return {
+      ...output,
+      degradedSignals: [...new Set([...(output.degradedSignals ?? []), ...degradedSignals])].sort(),
+      warnings: sortWarnings([...output.warnings, "Link-impact metadata was unavailable for this dry-run preview; no broad backlink or folder scan was performed."]),
+    };
+  }
 }
 
 async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, options: ObsidianManageOptions): Promise<ObsidianManageOutput> {
@@ -131,7 +162,7 @@ async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, o
     if (dryRun) {
       const target = await manager.preview({ fromPath: safeFromPath, toPath: safeToPath });
       const preview = buildMovePreview(target);
-      return makeManageOutput({
+      return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
         fromPath: safeFromPath,
@@ -141,7 +172,7 @@ async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, o
         message: `Dry-run preview: obsidian_manage would move ${safeFromPath} to ${safeToPath}.`,
         target,
         preview,
-      });
+      }), operation, safeFromPath);
     }
 
     const target = await manager.commit({ fromPath: safeFromPath, toPath: safeToPath });
@@ -266,7 +297,7 @@ async function handleCopyNote(request: ObsidianManageRequest, dryRun: boolean, o
     if (dryRun) {
       const target = await manager.previewCopy({ fromPath: safeFromPath, toPath: safeToPath });
       const preview = buildCopyPreview(target);
-      return makeManageOutput({
+      return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
         fromPath: safeFromPath,
@@ -276,7 +307,7 @@ async function handleCopyNote(request: ObsidianManageRequest, dryRun: boolean, o
         message: `Dry-run preview: obsidian_manage would copy ${safeFromPath} to ${safeToPath}.`,
         target,
         preview,
-      });
+      }), operation, safeFromPath);
     }
 
     const target = await manager.commitCopy({ fromPath: safeFromPath, toPath: safeToPath });
@@ -372,7 +403,7 @@ async function handleTrashNote(request: ObsidianManageRequest, dryRun: boolean, 
     if (dryRun) {
       const target = await manager.previewTrash({ path: safePath, trashFolder: safeTrashFolder, trashFolderDefaulted });
       const preview = buildTrashPreview(target);
-      return makeManageOutput({
+      return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
         path: safePath,
@@ -384,7 +415,7 @@ async function handleTrashNote(request: ObsidianManageRequest, dryRun: boolean, 
         target,
         preview,
         warnings: target.trashFolderWouldBeCreated ? [`Trash folder ${safeTrashFolder} would be created only if dryRun=false is explicitly supplied.`] : [],
-      });
+      }), operation, safePath);
     }
 
     const target = await manager.commitTrash({ path: safePath, trashFolder: safeTrashFolder, trashFolderDefaulted });
@@ -544,7 +575,7 @@ async function handleRestoreNote(request: ObsidianManageRequest, dryRun: boolean
     if (dryRun) {
       const target = await manager.previewRestore({ trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder, trashFolderDefaulted });
       const preview = buildRestorePreview(target);
-      return makeManageOutput({
+      return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
         trashPath: safeTrashPath,
@@ -555,7 +586,7 @@ async function handleRestoreNote(request: ObsidianManageRequest, dryRun: boolean
         message: `Dry-run preview: obsidian_manage would restore ${safeTrashPath} to ${safeToPath}.`,
         target,
         preview,
-      });
+      }), operation, safeTrashPath);
     }
 
     const target = await manager.commitRestore({ trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder, trashFolderDefaulted });

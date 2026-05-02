@@ -11,7 +11,7 @@ A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writ
 
 The extension registers four Pi-facing tools:
 
-- `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, and project/topic retrieval. Strictly read-only.
+- `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, project/topic retrieval, and explicit-path note inspection. Strictly read-only.
 - `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
 - `obsidian_manage` — safe single-note move/rename management via `move_note`, recoverable single-note trash via `trash_note`, explicit restore from trash via `restore_note`, and byte-for-byte single-note copy via `copy_note`. Dry-run preview is the default.
@@ -24,9 +24,10 @@ It also registers the existing status command:
 
 1. Use `obsidian_retrieve` first to retrieve candidates with `mode: "search"`, `mode: "graph"`, or a bounded `mode: "project"` request.
 2. Read `agentGuidance`; when it recommends selected context, call `obsidian_retrieve` again with `mode: "context"` and only the exact `selectedRef` paths returned by the previous response.
-3. Answer from retrieved context when possible. Do not request a vault dump or infer a mutation target from a topic query.
-4. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
-5. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`.
+3. When the user already provides one explicit safe vault-relative Markdown note path and asks what is in that note, use `obsidian_retrieve` with `mode: "note"` and `path` for bounded structured metadata; it does not return full note content by default.
+4. Answer from retrieved context or inspection metadata when possible. Do not request a vault dump or infer a mutation target from a topic query.
+5. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
+6. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`. Manage dry-run previews may include link-impact metadata, but links are never rewritten automatically.
 
 Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash/restore/copy intent and never performs side effects. `obsidian_write` refuses overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, `trash_note`, `restore_note`, and `copy_note`, including permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
@@ -88,9 +89,9 @@ When a vault name/id is configured, the retrieval adapter invokes the configured
 
 ## Retrieval usage examples
 
-Supported top-level request fields for `obsidian_retrieve` are exactly: `query`, `mode`, `selected`, `scope`, `budget`, `maxCandidates`, and `explain`.
+Supported top-level request fields for `obsidian_retrieve` are exactly: `query`, `mode`, `path`, `selected`, `scope`, `budget`, `maxCandidates`, and `explain`.
 
-Valid `mode` values: `auto`, `search`, `context`, `graph`, `project`.
+Valid `mode` values: `auto`, `search`, `context`, `graph`, `project`, `note`.
 Valid `budget` values: `tiny`, `standard`, `expanded`.
 
 Candidate discovery:
@@ -137,6 +138,12 @@ Project retrieval:
 
 ```json
 { "query": "Pi retrieval architecture", "mode": "project", "scope": { "folder": "Projects" }, "budget": "standard" }
+```
+
+Explicit note inspection returns bounded metadata such as frontmatter keys, headings, duplicate heading warnings, outgoing wiki/Markdown links, approximate counts, warnings, degraded signals, and next actions. It requires one explicit safe vault-relative Markdown `path` and omits full note content by default:
+
+```json
+{ "mode": "note", "path": "Projects/Plan.md", "budget": "tiny" }
 ```
 
 ## Write usage examples
@@ -252,7 +259,7 @@ Section headings must match exactly after Markdown heading normalization. Duplic
 
 Supported `obsidian_manage` top-level request fields are exactly: `operation`, `fromPath`, `toPath`, `path`, `trashPath`, `trashFolder`, and `dryRun`.
 
-The supported operations are exactly `move_note`, `trash_note`, `restore_note`, and `copy_note`. `dryRun` defaults to `true`, so the first call previews without moving or copying anything.
+The supported operations are exactly `move_note`, `trash_note`, `restore_note`, and `copy_note`. `dryRun` defaults to `true`, so the first call previews without moving or copying anything. Dry-run previews may include bounded `linkImpact` counts for outgoing wiki and Markdown links plus `linkRewriteSupported: false`; the extension does not scan broadly for inbound backlinks and never rewrites links automatically.
 
 Dry-run note move preview:
 

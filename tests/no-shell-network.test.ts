@@ -17,7 +17,10 @@ describe("process safety", () => {
   it("centralizes process spawning in the Obsidian CLI adapter and never uses shell/network/permanent-delete APIs", async () => {
     const files = await sourceFiles(path.join(process.cwd(), "src"));
     const intentionalWriteFiles = new Set(["src/vault-writer.ts", "src/write-engine.ts", "src/write-guidance.ts", "src/write-types.ts", "src/vault-editor.ts", "src/edit-engine.ts", "src/edit-guidance.ts", "src/edit-types.ts", "src/markdown-section-editor.ts", "src/frontmatter-editor.ts", "src/exact-text-editor.ts", "src/vault-manager.ts", "src/manage-engine.ts", "src/manage-guidance.ts", "src/manage-types.ts", "src/target-lock.ts"]);
-    expect(files.map((file) => path.relative(process.cwd(), file))).toContain("src/agent-guidance.ts");
+    const relativeFiles = files.map((file) => path.relative(process.cwd(), file));
+    expect(relativeFiles).toContain("src/agent-guidance.ts");
+    expect(relativeFiles).toContain("src/note-inspection.ts");
+    expect(relativeFiles).toContain("src/note-parser.ts");
     for (const file of files) {
       const text = await readFile(file, "utf8");
       const relative = path.relative(process.cwd(), file);
@@ -41,7 +44,7 @@ describe("process safety", () => {
   });
 
   it("does not contain filesystem-first discovery calls in retrieval modules", async () => {
-    const retrievalFiles = ["src/candidate-collector.ts", "src/retrieval-engine.ts", "src/metadata-enricher.ts"];
+    const retrievalFiles = ["src/candidate-collector.ts", "src/retrieval-engine.ts", "src/metadata-enricher.ts", "src/note-inspection.ts", "src/note-parser.ts", "src/section-selector.ts"];
     for (const file of retrievalFiles) {
       const text = await readFile(path.join(process.cwd(), file), "utf8");
       expect(text).not.toMatch(/fast-glob|glob\(|readdir\(|readFile\(/);

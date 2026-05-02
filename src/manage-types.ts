@@ -163,6 +163,16 @@ export interface ObsidianManageNextAction {
   } | undefined;
 }
 
+export interface ManageLinkImpact {
+  sourcePath: string;
+  outgoingWikiLinkCount: number;
+  outgoingMarkdownLinkCount: number;
+  hasOutgoingLinks: boolean;
+  linkImpactWarning: string;
+  linkRewriteSupported: false;
+  degradedSignals?: string[] | undefined;
+}
+
 export interface ObsidianManageOutput {
   tool: "obsidian_manage";
   status: ObsidianManageStatus;
@@ -177,6 +187,8 @@ export interface ObsidianManageOutput {
   message: string;
   target?: ManageTargetSummary | TrashTargetSummary | RestoreTargetSummary | CopyTargetSummary | undefined;
   preview?: ManagePreview | TrashPreview | RestorePreview | CopyPreview | undefined;
+  linkImpact?: ManageLinkImpact | undefined;
+  degradedSignals?: string[] | undefined;
   error?: ObsidianManageError | undefined;
   warnings: string[];
   nextActions: ObsidianManageNextAction[];

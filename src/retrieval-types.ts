@@ -1,5 +1,5 @@
-export type RetrievalMode = "auto" | "search" | "context" | "graph" | "project";
-export type ResolvedRetrievalMode = "search" | "context" | "graph" | "project";
+export type RetrievalMode = "auto" | "search" | "context" | "graph" | "project" | "note";
+export type ResolvedRetrievalMode = "search" | "context" | "graph" | "project" | "note";
 export type BudgetProfile = "tiny" | "standard" | "expanded";
 export type RankingSignal = "title" | "path" | "alias" | "tag" | "property" | "heading" | "content" | "backlink" | "outgoing_link" | "recency" | "project_folder" | "exact_file" | "fuzzy";
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
@@ -7,7 +7,7 @@ export type AgentResultState = "answer_from_discovery" | "request_context" | "am
 export type AnswerScope = "discovery_only" | "needs_selected_context" | "clarify_first" | "use_returned_context";
 export type ContextRecommendationMode = "none" | "context";
 export type StructuredAction = "answer" | "request_context" | "clarify" | "refine_query" | "inspect_alternative" | "stop";
-export type DegradedSignal = "metadata" | "backlinks" | "properties" | "recents" | "relationships";
+export type DegradedSignal = "metadata" | "backlinks" | "properties" | "recents" | "relationships" | "parsing" | "preview" | "budget";
 export type EvidenceQuality = "strong" | "supporting" | "weak" | "ignored";
 
 export interface SelectedCandidateRef {
@@ -25,6 +25,7 @@ export interface RetrievalScope {
 export interface RetrievalRequest {
   query?: string | undefined;
   mode?: RetrievalMode | undefined;
+  path?: string | undefined;
   selected?: SelectedCandidateRef[] | undefined;
   scope?: RetrievalScope | undefined;
   budget?: BudgetProfile | undefined;
@@ -345,11 +346,33 @@ export interface RankedCandidate {
   matchSummary?: MatchSummary | undefined;
 }
 
+export interface DuplicateHeadingWarning {
+  heading: string;
+  normalizedHeading: string;
+  occurrences: number;
+  lines: number[];
+  message: string;
+}
+
+export interface HeadingContextRef {
+  text: string;
+  level: number;
+  line?: number | undefined;
+}
+
+export type SectionSelectionKind = "exact_heading" | "nearest_relevant" | "candidate_evidence" | "fallback";
+
 export interface ContextSection {
   heading?: string | undefined;
+  headingLevel?: number | undefined;
   startLine?: number | undefined;
   endLine?: number | undefined;
   relevance: number;
+  selectionKind?: SectionSelectionKind | undefined;
+  selectionReason?: string | undefined;
+  parentHeadings?: HeadingContextRef[] | undefined;
+  childHeadings?: HeadingContextRef[] | undefined;
+  duplicateHeadingWarning?: DuplicateHeadingWarning | undefined;
   reasons: string[];
   excerpt: string;
   truncated: boolean;
@@ -437,12 +460,13 @@ export interface ContextRecommendation {
 
 export interface StructuredNextAction {
   priority: number;
-  action: StructuredAction;
+  action: StructuredAction | "answer_from_metadata" | "retry_with_path";
   label: string;
   params?: {
-    mode?: "context" | undefined;
+    mode?: "context" | "note" | undefined;
     selected?: SelectedCandidateRef[] | undefined;
     query?: string | undefined;
+    path?: string | undefined;
   } | undefined;
 }
 
@@ -455,14 +479,55 @@ export interface AgentGuidance {
   nextActions: StructuredNextAction[];
 }
 
+export interface WikiLinkMetadata {
+  raw: string;
+  target: string;
+  alias?: string | undefined;
+  anchor?: string | undefined;
+  embed: boolean;
+  line?: number | undefined;
+}
+
+export interface MarkdownLinkMetadata {
+  text: string;
+  target: string;
+  title?: string | undefined;
+  isImage: boolean;
+  isExternal: boolean;
+  line?: number | undefined;
+}
+
+export interface RetrieveError {
+  code: string;
+  category: "validation" | "safety" | "not_found" | "setup" | "runtime";
+  message: string;
+  recoverable: boolean;
+}
+
 export interface ObsidianRetrieveOutput {
+  tool?: "obsidian_retrieve" | undefined;
+  status?: "success" | "not_found" | "validation_error" | "safety_refusal" | "setup_required" | undefined;
   mode: ResolvedRetrievalMode;
   query?: string | undefined;
+  path?: string | undefined;
+  exists?: boolean | undefined;
+  noteType?: string | undefined;
+  frontmatterKeys?: string[] | undefined;
+  headings?: HeadingSummary[] | undefined;
+  firstHeading?: HeadingSummary | undefined;
+  duplicateHeadingWarnings?: DuplicateHeadingWarning[] | undefined;
+  outgoingWikiLinks?: WikiLinkMetadata[] | undefined;
+  outgoingMarkdownLinks?: MarkdownLinkMetadata[] | undefined;
+  approximateCharCount?: number | undefined;
+  approximateLineCount?: number | undefined;
+  preview?: string | undefined;
+  error?: RetrieveError | undefined;
   candidates: RankedCandidate[];
   context?: ContextPackage[] | undefined;
   graph?: RelationshipSummary | undefined;
   budget: BudgetReport;
   warnings: string[];
+  degradedSignals?: DegradedSignal[] | undefined;
   nextActions: string[];
   agentGuidance: AgentGuidance;
 }

@@ -1,4 +1,5 @@
-import type { CopyPreview, CopyTargetSummary, ManagePreview, ManageTargetSummary, ObsidianManageError, ObsidianManageNextAction, ObsidianManageOperation, ObsidianManageOutput, ObsidianManageStatus, RestorePreview, RestoreTargetSummary, TrashPreview, TrashTargetSummary } from "./manage-types.js";
+import type { CopyPreview, CopyTargetSummary, ManageLinkImpact, ManagePreview, ManageTargetSummary, ObsidianManageError, ObsidianManageNextAction, ObsidianManageOperation, ObsidianManageOutput, ObsidianManageStatus, RestorePreview, RestoreTargetSummary, TrashPreview, TrashTargetSummary } from "./manage-types.js";
+import type { DegradedSignal } from "./retrieval-types.js";
 
 const FORBIDDEN_OPERATIONS = new Set([
   "overwrite",
@@ -131,8 +132,39 @@ export function buildCopyPreview(target: CopyTargetSummary): CopyPreview {
   };
 }
 
+export function buildLinkImpact(input: {
+  operation: ObsidianManageOperation;
+  sourcePath: string;
+  outgoingWikiLinkCount: number;
+  outgoingMarkdownLinkCount: number;
+  degradedSignals?: DegradedSignal[] | undefined;
+}): ManageLinkImpact {
+  const hasOutgoingLinks = input.outgoingWikiLinkCount > 0 || input.outgoingMarkdownLinkCount > 0;
+  const degradedSignals = [...new Set(input.degradedSignals ?? [])].sort();
+  const warning = linkImpactWarning(input.operation, hasOutgoingLinks, degradedSignals.length > 0);
+  const impact: ManageLinkImpact = {
+    sourcePath: input.sourcePath,
+    outgoingWikiLinkCount: input.outgoingWikiLinkCount,
+    outgoingMarkdownLinkCount: input.outgoingMarkdownLinkCount,
+    hasOutgoingLinks,
+    linkImpactWarning: warning,
+    linkRewriteSupported: false,
+  };
+  if (degradedSignals.length > 0) impact.degradedSignals = degradedSignals;
+  return impact;
+}
+
+export function linkImpactWarning(operation: ObsidianManageOperation, hasOutgoingLinks: boolean, inboundDegraded: boolean): string {
+  const operationLabel = operation.replace("_note", "");
+  const outgoing = hasOutgoingLinks ? "Outgoing links were detected" : "No outgoing links were detected";
+  if (operation === "copy_note") return `This copy preview does not rewrite links. ${outgoing}; copied content will preserve link targets exactly.`;
+  if (operation === "restore_note") return `This restore preview does not rewrite links. ${outgoing}; backlink and relationship data is not scanned broadly.`;
+  const inbound = inboundDegraded ? " and inbound links may be affected because backlink data is unavailable without a broad scan" : "";
+  return `This ${operationLabel} preview does not rewrite links. ${outgoing}${inbound}.`;
+}
+
 export function makeManageOutput(input: {
-  status: ObsidianManageStatus;
+  status: ObsidianManageOutput["status"];
   operation?: string | undefined;
   fromPath?: string | undefined;
   toPath?: string | undefined;
@@ -144,6 +176,8 @@ export function makeManageOutput(input: {
   message: string;
   target?: ManageTargetSummary | TrashTargetSummary | RestoreTargetSummary | CopyTargetSummary | undefined;
   preview?: ManagePreview | TrashPreview | RestorePreview | CopyPreview | undefined;
+  linkImpact?: ManageLinkImpact | undefined;
+  degradedSignals?: string[] | undefined;
   error?: ObsidianManageError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianManageNextAction[] | undefined;
@@ -174,6 +208,8 @@ export function makeManageOutput(input: {
   if (input.trashPath) output.trashPath = input.trashPath;
   if (input.target) output.target = input.target;
   if (input.preview) output.preview = input.preview;
+  if (input.linkImpact) output.linkImpact = input.linkImpact;
+  if (input.degradedSignals && input.degradedSignals.length > 0) output.degradedSignals = [...new Set(input.degradedSignals)].sort();
   if (input.error) output.error = input.error;
   return output;
 }
