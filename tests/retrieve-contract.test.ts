@@ -14,12 +14,12 @@ function fakePi() {
 }
 
 describe("obsidian_retrieve contract", () => {
-  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, obsidian_manage, plus status command and supports backend injection", async () => {
+  it("registers obsidian_retrieve, obsidian_validate, obsidian_plan, obsidian_write, obsidian_edit, obsidian_manage, plus status command and supports backend injection", async () => {
     const pi = fakePi();
     const backend = seededFakeCli();
     registerObsidianVault(pi as any, { backend });
 
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_validate", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
     expect(pi.commands.has("obsidian-vault")).toBe(true);
     const result = await pi.tools.get("obsidian_retrieve").execute("id", { query: "IG", mode: "search" });
     expect(result.details.candidates[0].path).toBe("Research/Integrated Gradients/index.md");
@@ -105,8 +105,9 @@ describe("obsidian_retrieve contract", () => {
     const graph = await obsidianRetrieve(seededFakeCli(), { query: "Integrated Gradients", mode: "graph" });
     const project = await obsidianRetrieve(seededFakeCli(), { query: "Pi Obsidian Harness", mode: "project", scope: { folder: "Projects" } });
     const note = await obsidianRetrieve(seededFakeCli(), { mode: "note", path: "Research/Integrated Gradients/index.md" });
+    const relationships = await obsidianRetrieve(seededFakeCli(), { mode: "relationships", path: "Research/Integrated Gradients/index.md" });
 
-    for (const result of [search, context, graph, project, note]) {
+    for (const result of [search, context, graph, project, note, relationships]) {
       expect(result.agentGuidance).toMatchObject({
         resultState: expect.any(String),
         confidence: { level: expect.any(String), ambiguous: expect.any(Boolean), rationale: expect.any(String) },

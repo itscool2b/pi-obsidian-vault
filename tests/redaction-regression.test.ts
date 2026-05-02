@@ -2,6 +2,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { obsidianEdit } from "../src/edit-engine.js";
 import { obsidianManage } from "../src/manage-engine.js";
+import { obsidianPlan } from "../src/plan-engine.js";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
 import { obsidianValidate } from "../src/validation-engine.js";
 import { obsidianWrite } from "../src/write-engine.js";
@@ -16,12 +17,15 @@ function assertNoLeakedPaths(value: unknown, vaultRoot: string, extra: string[] 
 }
 
 describe("release redaction regression", () => {
-  it("keeps note inspection success, missing, and unsafe responses redacted", async () => {
+  it("keeps note inspection and relationship success, missing, and unsafe responses redacted", async () => {
     const backend = new FakeObsidianCliBackend().addNote({ path: "Notes/Plan.md", title: "Plan", content: "# Plan\n[[Other]]\n" });
     const success = await obsidianRetrieve(backend, { mode: "note", path: "Notes/Plan.md" });
     const missing = await obsidianRetrieve(backend, { mode: "note", path: "Notes/Missing.md" });
     const unsafe = await obsidianRetrieve(backend, { mode: "note", path: "/tmp/outside.md" });
-    for (const result of [success, missing, unsafe]) {
+    const relationshipSuccess = await obsidianRetrieve(backend, { mode: "relationships", path: "Notes/Plan.md" });
+    const relationshipMissing = await obsidianRetrieve(backend, { mode: "relationships", path: "Notes/Missing.md" });
+    const relationshipUnsafe = await obsidianRetrieve(backend, { mode: "relationships", path: "/tmp/outside.md" });
+    for (const result of [success, missing, unsafe, relationshipSuccess, relationshipMissing, relationshipUnsafe]) {
       expect(JSON.stringify(result)).not.toContain("/tmp/outside.md");
       expect(JSON.stringify(result)).not.toMatch(/lock|vaultRoot/i);
     }
@@ -105,6 +109,22 @@ describe("release redaction regression", () => {
         assertNoLeakedPaths(result, vaultRoot, ["../outside.md"]);
         expect(JSON.stringify(result.nextActions)).not.toContain(vaultRoot);
         expect(JSON.stringify(result.warnings)).not.toContain(vaultRoot);
+      }
+    });
+  });
+
+  it("keeps plan preview success, validation, conflict, warning, and unsafe responses redacted", async () => {
+    await withTempVault(async (vaultRoot) => {
+      await seedNote(vaultRoot, "Notes/Plan.md", "# Plan");
+      await seedFolder(vaultRoot, "Archive");
+      const success = await obsidianPlan({ operations: [{ tool: "obsidian_manage", operation: "copy_note", fromPath: "Notes/Plan.md", toPath: "Archive/Plan.md" }] }, { vaultRoot });
+      const validation = await obsidianPlan({ operations: [] }, { vaultRoot });
+      const conflict = await obsidianPlan({ operations: [{ tool: "obsidian_manage", operation: "copy_note", fromPath: "Notes/Plan.md", toPath: "Archive/Plan.md" }, { tool: "obsidian_manage", operation: "copy_note", fromPath: "Notes/Plan.md", toPath: "Archive/Plan.md" }] }, { vaultRoot });
+      const warning = await obsidianPlan({ operations: [{ tool: "obsidian_retrieve", operation: "note", path: "Notes/Plan.md", dryRun: false }] }, { vaultRoot });
+      const unsafe = await obsidianPlan({ operations: [{ tool: "obsidian_write", operation: "create", path: "/tmp/outside.md", content: "x" }] }, { vaultRoot });
+      for (const result of [success, validation, conflict, warning, unsafe]) {
+        assertNoLeakedPaths(result, vaultRoot, ["/tmp/outside.md"]);
+        expect(JSON.stringify(result)).not.toMatch(/vaultRoot|lockKey/i);
       }
     });
   });

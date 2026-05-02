@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { OBSIDIAN_RETRIEVE_BUDGETS, OBSIDIAN_VALIDATE_TARGETS, registerObsidianVault } from "../src/index.js";
+import { OBSIDIAN_RETRIEVE_BUDGETS, OBSIDIAN_RETRIEVE_MODES, OBSIDIAN_VALIDATE_TARGETS, registerObsidianVault } from "../src/index.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
 import { PUBLIC_TOOL_NAMES, SUPPORTED_OPERATIONS } from "./release-hardening-fixtures.js";
 import { requireCapabilities } from "./status-test-utils.js";
@@ -18,7 +18,7 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers obsidian_retrieve, obsidian_validate, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
+  it("registers obsidian_retrieve, obsidian_validate, obsidian_plan, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
@@ -28,6 +28,7 @@ describe("public tool surface", () => {
   it("keeps the public operation matrix limited to the release-hardened surface", () => {
     expect(SUPPORTED_OPERATIONS.obsidian_write).toEqual(["create", "append", "create_folder"]);
     expect(SUPPORTED_OPERATIONS.obsidian_edit).toEqual(["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"]);
+    expect(SUPPORTED_OPERATIONS.obsidian_plan).toEqual(["retrieve.note", "retrieve.relationships", "validate.existing_note", "validate.proposed_content", "write.create", "write.append", "write.create_folder", "edit.replace_section", "edit.insert_under_heading", "edit.update_frontmatter", "edit.remove_frontmatter", "edit.replace_exact_text", "manage.move_note", "manage.trash_note", "manage.restore_note", "manage.copy_note"]);
     expect(SUPPORTED_OPERATIONS.obsidian_manage).toEqual(["move_note", "trash_note", "restore_note", "copy_note"]);
   });
 
@@ -38,9 +39,9 @@ describe("public tool surface", () => {
     const schema = tool.parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "explain", "maxCandidates", "mode", "path", "query", "scope", "selected"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "explain", "includeBacklinks", "includeOutgoing", "includeSections", "maxCandidates", "maxRelated", "mode", "path", "query", "scope", "selected"]);
     expect(schema.properties.budget.enum).toEqual([...OBSIDIAN_RETRIEVE_BUDGETS]);
-    expect(schema.properties.mode.enum).toEqual(["auto", "search", "context", "graph", "project", "note"]);
+    expect(schema.properties.mode.enum).toEqual([...OBSIDIAN_RETRIEVE_MODES]);
     expect(schema.properties.selected.items.additionalProperties).toBe(false);
     expect(schema.properties.scope.additionalProperties).toBe(false);
 
@@ -49,8 +50,9 @@ describe("public tool surface", () => {
     expect(surfaceText).toContain('"mode":"graph"');
     expect(surfaceText).toContain('"mode":"context"');
     expect(surfaceText).toContain('"mode":"note"');
+    expect(surfaceText).toContain('"mode":"relationships"');
     expect(surfaceText).toContain("tiny, standard, expanded");
-    expect(surfaceText).not.toContain('"include"');
+    expect(surfaceText).toContain("includeBacklinks");
   });
 
   it("publishes a strict obsidian_validate schema for existing notes and proposed content", () => {
@@ -75,6 +77,25 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/warning-severity advisory/i);
     expect(surfaceText).toMatch(/never creates/i);
     expect(surfaceText).not.toMatch(/template variables/i);
+  });
+
+  it("publishes a strict obsidian_plan schema for preview-only operation sequences", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const tool = pi.tools.get("obsidian_plan");
+    const schema = tool.parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "explain", "maxOperations", "operations"]);
+    expect(schema.properties.operations.items.additionalProperties).toBe(false);
+    expect(Value.Check(schema, { operations: [{ tool: "obsidian_retrieve", operation: "relationships", path: "Projects/Plan.md", maxRelated: 5, includeSections: true }] })).toBe(true);
+    expect(Value.Check(schema, { operations: [{ tool: "obsidian_write", operation: "create", path: "Projects/Plan.md", content: "# Plan", dryRun: false }] })).toBe(true);
+    expect(Value.Check(schema, { operations: [], execute: true })).toBe(false);
+    const surfaceText = [tool.description, tool.promptSnippet, ...(tool.promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/never executes|never commits/i);
+    expect(surfaceText).toMatch(/retrieve\.relationships/);
+    expect(surfaceText).toMatch(/commit tokens/i);
+    expect(surfaceText).toMatch(/no broad backlink scan/i);
   });
 
   it("publishes a strict obsidian_write schema without destination inference fields", () => {
@@ -235,6 +256,7 @@ describe("public tool surface", () => {
     expect(docs).toContain('"mode": "graph"');
     expect(docs).toContain('"mode": "context"');
     expect(docs).toContain('"mode": "note"');
-    expect(docs).not.toContain('"include"');
+    expect(docs).toContain('"mode": "relationships"');
+    expect(docs).toContain("obsidian_plan");
   });
 });

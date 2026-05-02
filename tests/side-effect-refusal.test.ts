@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
 import { obsidianEdit } from "../src/edit-engine.js";
 import { obsidianManage } from "../src/manage-engine.js";
+import { obsidianPlan } from "../src/plan-engine.js";
 import { obsidianValidate } from "../src/validation-engine.js";
 import { obsidianWrite } from "../src/write-engine.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
@@ -26,6 +27,8 @@ describe("side-effect refusal", () => {
     expect(copyIntent.warnings.join("\n")).toMatch(/read-only/i);
     const noteIntent = await obsidianRetrieve(seededFakeCli(), { query: "delete note content", mode: "note", path: "Research/Integrated Gradients/index.md" });
     expect(noteIntent.warnings.join("\n")).toMatch(/read-only/i);
+    const relationshipIntent = await obsidianRetrieve(seededFakeCli(), { mode: "relationships", path: "Research/Integrated Gradients/index.md" });
+    expect(JSON.stringify(relationshipIntent.nextActions)).not.toMatch(/rewrite_links|commit_token|batch/i);
     expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
     expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
   });
@@ -61,6 +64,17 @@ describe("side-effect refusal", () => {
         expect(result).toMatchObject({ status: "safety_refusal", committed: false, error: { category: "safety" } });
       }
     });
+  });
+
+  it("reports forbidden plan operations without executing them", async () => {
+    const result = await obsidianPlan({ operations: [
+      { id: "batch", tool: "obsidian_plan", operation: "batch_execute" },
+      { id: "rewrite", tool: "obsidian_manage", operation: "rewrite_links", path: "Notes/A.md" },
+      { id: "commit", tool: "obsidian_write", operation: "commit_token", path: "Notes/A.md", content: "x", dryRun: false },
+    ] });
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["UNSUPPORTED_TOOL", "FORBIDDEN_OPERATION", "FORBIDDEN_OPERATION"]));
+    expect(JSON.stringify(result)).not.toMatch(/execute.*success|committed.*true/i);
   });
 
   it("returns safety_refusal for forbidden manage operations", async () => {

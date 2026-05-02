@@ -1,8 +1,9 @@
 # Pi Obsidian Vault Harness
 
-A small Pi extension for safe Obsidian vault retrieval, workflow-neutral Markdown validation, controlled Markdown writing, safe structured editing, and controlled single-note management.
+A small Pi extension for safe Obsidian vault retrieval, bounded relationship summaries, read-only operation plan preview, workflow-neutral Markdown validation, controlled Markdown writing, safe structured editing, and controlled single-note management.
 
-- Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only.
+- Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only, including explicit-note `mode: "relationships"` summaries.
+- Plan preview uses `obsidian_plan` to validate bounded operation sequences and virtual effects without executing, committing, batching, staging, or creating commit tokens.
 - Validation uses one explicit existing note or explicit proposed content, remains read-only, and reports advisory workflow-neutral Markdown issues.
 - Writing uses explicit vault-relative paths under a configured local vault path and supports only Markdown create/append, folder creation, and dry-run preview.
 - Structured editing uses explicit vault-relative Markdown paths to existing notes and supports only section replacement/insertion, top-of-file frontmatter property updates/removals, and literal exact-text replacement.
@@ -10,29 +11,32 @@ A small Pi extension for safe Obsidian vault retrieval, workflow-neutral Markdow
 
 ## Public tool surface
 
-The extension registers five Pi-facing tools:
+The extension registers six Pi-facing tools:
 
-- `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, project/topic retrieval, and explicit-path note inspection. Strictly read-only.
+- `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, project/topic retrieval, explicit-path note inspection, and explicit-path relationship summaries. Strictly read-only.
 - `obsidian_validate` — read-only validation for one explicit existing Markdown note or explicit proposed Markdown content. Validation is workflow-neutral and advisory.
+- `obsidian_plan` — read-only operation sequence preview for existing public retrieval, validation, write, edit, and manage operations. It never executes or commits.
 - `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
 - `obsidian_manage` — safe single-note move/rename management via `move_note`, recoverable single-note trash via `trash_note`, explicit restore from trash via `restore_note`, and byte-for-byte single-note copy via `copy_note`. Dry-run preview is the default.
 
 It also registers the existing status command:
 
-- `/obsidian-vault` — reports retrieval CLI/vault configuration health plus a compact retrieve/write/edit/manage capability table as available, unavailable, or degraded without exposing the local vault root.
+- `/obsidian-vault` — reports retrieval CLI/vault configuration health plus a compact retrieve/write/edit/manage/plan capability table as available, unavailable, or degraded without exposing the local vault root.
 
 ## Recommended agent workflow
 
 1. Use `obsidian_retrieve` first to retrieve candidates with `mode: "search"`, `mode: "graph"`, or a bounded `mode: "project"` request.
 2. Read `agentGuidance`; when it recommends selected context, call `obsidian_retrieve` again with `mode: "context"` and only the exact `selectedRef` paths returned by the previous response.
 3. When the user already provides one explicit safe vault-relative Markdown note path and asks what is in that note, use `obsidian_retrieve` with `mode: "note"` and `path` for bounded structured metadata; it does not return full note content by default.
-4. Use `obsidian_validate` when you need read-only Markdown validation before suggesting edits or asking to commit content. Use `target: "existing_note"` with one explicit safe Markdown path, or `target: "proposed_content"` with explicit content.
-5. Answer from retrieved context, inspection metadata, or validation output when possible. Do not request a vault dump or infer a mutation target from a topic query.
-6. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
-7. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`. Write dry-run validation metadata is advisory. Manage dry-run previews may include link-impact metadata, but links are never rewritten automatically.
+4. When the user provides one explicit safe vault-relative Markdown path and asks how a note connects to other notes, use `obsidian_retrieve` with `mode: "relationships"`; it reads only that note plus targeted safe backlink metadata when available, never performs a vault-wide backlink scan, and never rewrites links.
+5. Use `obsidian_validate` when you need read-only Markdown validation before suggesting edits or asking to commit content. Use `target: "existing_note"` with one explicit safe Markdown path, or `target: "proposed_content"` with explicit content.
+6. Use `obsidian_plan` to preview a bounded sequence of explicit operations before requesting individual dry-runs; it detects conflicts and ordering hazards but cannot execute, commit, stage, batch, transact, reserve paths, or create commit tokens.
+7. Answer from retrieved context, inspection metadata, relationship summaries, validation output, or plan preview when possible. Do not request a vault dump or infer a mutation target from a topic query.
+8. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
+9. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`. Write dry-run validation metadata is advisory. Manage dry-run previews may include link-impact metadata, but links are never rewritten automatically.
 
-Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash/restore/copy intent and never performs side effects. `obsidian_validate` never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, creates transaction previews, creates commit tokens, or executes arbitrary commands. `obsidian_write` refuses overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, `trash_note`, `restore_note`, and `copy_note`, including permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
+Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash/restore/copy intent and never performs side effects. Relationship retrieval requires one explicit safe Markdown path, stays bounded and read-only, degrades when backlinks are unavailable, performs no vault-wide backlink scan, and never crawls recursively or rewrites links. `obsidian_plan` never mutates, executes, commits, stages, batches, transactionally applies, reserves paths, creates commit tokens, rewrites links, scans broadly, opens UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands. `obsidian_validate` never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, creates transaction previews, creates commit tokens, or executes arbitrary commands. `obsidian_write` refuses overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, `trash_note`, `restore_note`, and `copy_note`, including permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
 ## First-time setup
 
@@ -48,7 +52,7 @@ cat > ~/.pi/agent/obsidian-vault.json <<'JSON'
 JSON
 ```
 
-Replace `/absolute/path/to/vault` with your real vault folder, then run `/obsidian-vault` in Pi. The status command is side-effect-free: it reports whether the CLI can reach a running Obsidian instance, whether local writes are available, and whether `obsidian_edit` and `obsidian_manage` are available, unavailable, or degraded. It does not open Obsidian and does not expose the local vault root in status output. If `obsidian` opens the desktop app on your system, use `obsidian-cli` for `cliPath`/`OBSIDIAN_CLI_PATH`.
+Replace `/absolute/path/to/vault` with your real vault folder, then run `/obsidian-vault` in Pi. The status command is side-effect-free: it reports whether the CLI can reach a running Obsidian instance, whether local writes are available, and whether `obsidian_edit`, `obsidian_manage`, and `obsidian_plan` targeted checks are available, unavailable, or degraded. It does not open Obsidian and does not expose the local vault root in status output. If `obsidian` opens the desktop app on your system, use `obsidian-cli` for `cliPath`/`OBSIDIAN_CLI_PATH`.
 
 `obsidian_write`, `obsidian_edit`, and `obsidian_manage` require a local `vaultPath`/`OBSIDIAN_VAULT_PATH`. Vault name/id targets are retrieval-only because safe local mutations must be resolved under a configured local vault directory.
 
@@ -70,7 +74,7 @@ Please:
 4. Verify the vault path exists and is a directory.
 5. Do not scan, read, modify, open, or write any notes in the vault.
 6. After setup, tell me whether I need to restart Pi.
-7. Ask me to run /obsidian-vault and confirm it shows Source: config, Writes: available, obsidian_edit: available, and obsidian_manage: available.
+7. Ask me to run /obsidian-vault and confirm it shows Source: config, Writes: available, obsidian_edit: available, obsidian_manage: available, and obsidian_plan: available.
 ```
 
 You can also configure through environment variables:
@@ -92,9 +96,9 @@ When a vault name/id is configured, the retrieval adapter invokes the configured
 
 ## Retrieval usage examples
 
-Supported top-level request fields for `obsidian_retrieve` are exactly: `query`, `mode`, `path`, `selected`, `scope`, `budget`, `maxCandidates`, and `explain`.
+Supported top-level request fields for `obsidian_retrieve` are exactly: `query`, `mode`, `path`, `selected`, `scope`, `budget`, `maxCandidates`, `maxRelated`, `includeBacklinks`, `includeOutgoing`, `includeSections`, and `explain`.
 
-Valid `mode` values: `auto`, `search`, `context`, `graph`, `project`, `note`.
+Valid `mode` values: `auto`, `search`, `context`, `graph`, `project`, `note`, `relationships`.
 Valid `budget` values: `tiny`, `standard`, `expanded`.
 
 Candidate discovery:
@@ -148,6 +152,31 @@ Explicit note inspection returns bounded metadata such as frontmatter keys, head
 ```json
 { "mode": "note", "path": "Projects/Plan.md", "budget": "tiny" }
 ```
+
+Explicit relationship retrieval returns bounded outgoing links, safe inbound references when already available, related-note metadata, link-impact metadata, warnings, degraded signals, and next actions. It requires one explicit safe vault-relative Markdown `path`; `includeSections` defaults to false, backlinks degrade safely when unavailable, and no broad vault or backlink scan is performed:
+
+```json
+{ "mode": "relationships", "path": "Projects/Plan.md", "budget": "standard", "maxRelated": 10, "includeBacklinks": true }
+```
+
+## Plan preview usage examples
+
+Supported `obsidian_plan` top-level request fields are exactly: `operations`, `maxOperations`, `budget`, and `explain`.
+
+`obsidian_plan` previews bounded ordered sequences of existing public capabilities: `retrieve.note`, `retrieve.relationships`, `validate.existing_note`, `validate.proposed_content`, `write.create`, `write.append`, `write.create_folder`, `edit.replace_section`, `edit.insert_under_heading`, `edit.update_frontmatter`, `edit.remove_frontmatter`, `edit.replace_exact_text`, `manage.move_note`, `manage.trash_note`, `manage.restore_note`, and `manage.copy_note`. It validates paths and targeted state where safe, simulates virtual effects in memory, reports deterministic issues/conflicts/plannedEffects, and never executes, commits, batches, stages, transactionally applies, locks/reserves paths, rewrites links, scans broadly, shells out, opens UI, or creates commit tokens.
+
+```json
+{
+  "operations": [
+    { "id": "create", "tool": "obsidian_write", "operation": "create", "path": "Projects/Plan.md", "content": "# Plan\n" },
+    { "id": "append", "tool": "obsidian_write", "operation": "append", "path": "Projects/Plan.md", "content": "\n## Next\nReview." },
+    { "id": "relationships", "tool": "obsidian_retrieve", "operation": "relationships", "path": "Projects/Plan.md" }
+  ],
+  "budget": "standard"
+}
+```
+
+If any planned entry contains `dryRun: false`, `obsidian_plan` warns and ignores it; the plan remains a non-executing preview. If the plan is valid, ask for individual existing-tool dry-runs next. If `valid:false`, revise the plan until error-severity issues are resolved.
 
 ## Validation usage examples
 

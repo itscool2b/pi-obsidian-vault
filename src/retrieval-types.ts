@@ -1,5 +1,5 @@
-export type RetrievalMode = "auto" | "search" | "context" | "graph" | "project" | "note";
-export type ResolvedRetrievalMode = "search" | "context" | "graph" | "project" | "note";
+export type RetrievalMode = "auto" | "search" | "context" | "graph" | "project" | "note" | "relationships";
+export type ResolvedRetrievalMode = "search" | "context" | "graph" | "project" | "note" | "relationships";
 export type BudgetProfile = "tiny" | "standard" | "expanded";
 export type RankingSignal = "title" | "path" | "alias" | "tag" | "property" | "heading" | "content" | "backlink" | "outgoing_link" | "recency" | "project_folder" | "exact_file" | "fuzzy";
 export type ConfidenceLevel = "high" | "medium" | "low" | "none";
@@ -7,7 +7,7 @@ export type AgentResultState = "answer_from_discovery" | "request_context" | "am
 export type AnswerScope = "discovery_only" | "needs_selected_context" | "clarify_first" | "use_returned_context";
 export type ContextRecommendationMode = "none" | "context";
 export type StructuredAction = "answer" | "request_context" | "clarify" | "refine_query" | "inspect_alternative" | "stop";
-export type DegradedSignal = "metadata" | "backlinks" | "properties" | "recents" | "relationships" | "parsing" | "preview" | "budget";
+export type DegradedSignal = "metadata" | "backlinks" | "backlinks_unavailable" | "properties" | "recents" | "relationships" | "relationships_limited" | "sections_limited" | "parsing" | "preview" | "budget";
 export type EvidenceQuality = "strong" | "supporting" | "weak" | "ignored";
 
 export interface SelectedCandidateRef {
@@ -30,6 +30,10 @@ export interface RetrievalRequest {
   scope?: RetrievalScope | undefined;
   budget?: BudgetProfile | undefined;
   maxCandidates?: number | undefined;
+  maxRelated?: number | undefined;
+  includeBacklinks?: boolean | undefined;
+  includeOutgoing?: boolean | undefined;
+  includeSections?: boolean | undefined;
   explain?: boolean | undefined;
 }
 
@@ -521,6 +525,11 @@ export interface ObsidianRetrieveOutput {
   approximateCharCount?: number | undefined;
   approximateLineCount?: number | undefined;
   preview?: string | undefined;
+  relationshipSummary?: unknown;
+  inboundReferences?: unknown[] | undefined;
+  relatedNotes?: unknown[] | undefined;
+  linkImpact?: unknown;
+  sectionRelationshipSummaries?: unknown[] | undefined;
   error?: RetrieveError | undefined;
   candidates: RankedCandidate[];
   context?: ContextPackage[] | undefined;
@@ -528,7 +537,7 @@ export interface ObsidianRetrieveOutput {
   budget: BudgetReport;
   warnings: string[];
   degradedSignals?: DegradedSignal[] | undefined;
-  nextActions: string[];
+  nextActions: Array<string | StructuredNextAction | { priority: number; action: string; label: string; params?: unknown }>;
   agentGuidance: AgentGuidance;
 }
 

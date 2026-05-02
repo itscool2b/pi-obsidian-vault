@@ -9,10 +9,12 @@ import { obsidianRetrieve } from "./retrieval-engine.js";
 import { obsidianValidate, setupRequiredValidationResponse } from "./validation-engine.js";
 import { obsidianEdit } from "./edit-engine.js";
 import { obsidianManage } from "./manage-engine.js";
+import { obsidianPlan } from "./plan-engine.js";
 import { obsidianWrite } from "./write-engine.js";
 import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianCliHealth, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
 import type { ObsidianEditRequest } from "./edit-types.js";
 import type { ObsidianManageRequest } from "./manage-types.js";
+import type { ObsidianPlanRequest } from "./plan-types.js";
 import type { ObsidianValidateRequest } from "./validation-types.js";
 import type { ObsidianWriteRequest } from "./write-types.js";
 
@@ -23,9 +25,12 @@ export { obsidianRetrieve } from "./retrieval-engine.js";
 export { obsidianValidate } from "./validation-engine.js";
 export { obsidianEdit } from "./edit-engine.js";
 export { obsidianManage } from "./manage-engine.js";
+export { obsidianPlan } from "./plan-engine.js";
 export { obsidianWrite } from "./write-engine.js";
 export * from "./edit-types.js";
 export * from "./manage-types.js";
+export * from "./plan-types.js";
+export * from "./relationship-types.js";
 export * from "./validation-types.js";
 export * from "./write-types.js";
 
@@ -34,14 +39,14 @@ export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
 }
 
 export const OBSIDIAN_RETRIEVE_BUDGETS = ["tiny", "standard", "expanded"] as const;
-export const OBSIDIAN_RETRIEVE_MODES = ["auto", "search", "context", "graph", "project", "note"] as const;
+export const OBSIDIAN_RETRIEVE_MODES = ["auto", "search", "context", "graph", "project", "note", "relationships"] as const;
 export const OBSIDIAN_VALIDATE_TARGETS = ["existing_note", "proposed_content"] as const;
 
 const Budget = StringEnum(OBSIDIAN_RETRIEVE_BUDGETS, {
   description: "Response budget profile. Valid values: tiny, standard, expanded.",
 });
 const Mode = StringEnum(OBSIDIAN_RETRIEVE_MODES, {
-  description: "Retrieval mode. Valid values: auto, search, context, graph, project, note.",
+  description: "Retrieval mode. Valid values: auto, search, context, graph, project, note, relationships.",
 });
 const ValidationTarget = StringEnum(OBSIDIAN_VALIDATE_TARGETS, {
   description: "Validation target. Valid values: existing_note or proposed_content.",
@@ -60,17 +65,21 @@ const ScopeParam = Type.Object({
 }, { additionalProperties: false, description: "Optional bounded discovery scope." });
 
 const ObsidianRetrieveParams = Type.Object({
-  query: Type.Optional(Type.String({ description: "Natural-language query, title, alias, tag, property, or project/topic phrase. For mode=note, this may only guide optional preview/explanation and never infers the path." })),
+  query: Type.Optional(Type.String({ description: "Natural-language query, title, alias, tag, property, or project/topic phrase. For mode=note, this may only guide optional preview/explanation and never infers the path. For mode=relationships, query is not used to infer paths." })),
   mode: Type.Optional(Mode),
-  path: Type.Optional(Type.String({ description: "Only for mode=note: one explicit safe vault-relative Markdown note path to inspect. No absolute, traversal, hidden, .obsidian, wildcard, recursive, bulk/list, folder, or non-Markdown paths." })),
+  path: Type.Optional(Type.String({ description: "Only for mode=note or mode=relationships: one explicit safe vault-relative Markdown note path. No absolute, traversal, hidden, .obsidian, wildcard, recursive, bulk/list, folder, or non-Markdown paths." })),
   selected: Type.Optional(Type.Array(SelectedRefParam, { description: "Only for context mode: exact selectedRef objects returned by prior obsidian_retrieve candidates or agentGuidance." })),
   scope: Type.Optional(ScopeParam),
   budget: Type.Optional(Budget),
-  maxCandidates: Type.Optional(Type.Integer({ minimum: 1, maximum: 12, description: "Maximum ranked candidates to return (1-12, also capped by budget)." })),
-  explain: Type.Optional(Type.Boolean({ description: "When true, preserve concise ranking rationale where budget allows." })),
+  maxCandidates: Type.Optional(Type.Integer({ minimum: 1, maximum: 12, description: "Maximum ranked candidates to return (1-12, also capped by budget). Not accepted by mode=relationships." })),
+  maxRelated: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Only for mode=relationships: bounded cap for relationship entries per category." })),
+  includeBacklinks: Type.Optional(Type.Boolean({ description: "Only for mode=relationships: include inbound references when safely available; degrades instead of scanning broadly." })),
+  includeOutgoing: Type.Optional(Type.Boolean({ description: "Only for mode=relationships: include outgoing links parsed from the explicit note. Defaults to true." })),
+  includeSections: Type.Optional(Type.Boolean({ description: "Only for mode=relationships: include tiny bounded section relationship summaries. Defaults to false." })),
+  explain: Type.Optional(Type.Boolean({ description: "When true, preserve concise ranking or relationship rationale where budget allows." })),
 }, {
   additionalProperties: false,
-  description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, path, selected, scope, budget, maxCandidates, explain. Valid modes: auto, search, context, graph, project, note. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}.",
+  description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, path, selected, scope, budget, maxCandidates, maxRelated, includeBacklinks, includeOutgoing, includeSections, explain. Valid modes: auto, search, context, graph, project, note, relationships. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}; relationships {\"mode\":\"relationships\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"standard\",\"maxRelated\":10}.",
 });
 
 const ObsidianValidateParams = Type.Object({
@@ -110,6 +119,40 @@ const ObsidianEditParams = Type.Object({
   description: "obsidian_edit arguments. Supported top-level fields only: operation, path, heading, content, property, value, oldText, newText, dryRun. Supported operations: replace_section, insert_under_heading, update_frontmatter, remove_frontmatter, replace_exact_text. dryRun defaults to true. Path must be an explicit safe vault-relative Markdown path to an existing note. No create, full-note overwrite, delete, trash, restore, copy, rename, move, open UI, shell, network, regex, fuzzy, scan, or arbitrary CLI behavior is supported.",
 });
 
+const PlannedOperationParam = Type.Object({
+  id: Type.Optional(Type.String({ description: "Optional non-empty unique operation id for issue references." })),
+  tool: Type.Optional(Type.String({ description: "Canonical public tool name such as obsidian_write, obsidian_edit, obsidian_manage, obsidian_retrieve, or obsidian_validate." })),
+  category: Type.Optional(Type.String({ description: "Canonical category alias: write, edit, manage, retrieve, or validate." })),
+  operation: Type.Optional(Type.String({ description: "Mirrored public operation name. Supported operations are retrieve note/relationships, validate existing/proposed content, write create/append/create_folder, edit structured operations, and manage move/trash/restore/copy." })),
+  path: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown path or folder path where required by the mirrored operation." })),
+  fromPath: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown source path for move_note or copy_note." })),
+  toPath: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown destination path for move_note, restore_note, or copy_note." })),
+  trashPath: Type.Optional(Type.String({ description: "Explicit safe vault-relative Markdown trash source path for restore_note." })),
+  trashFolder: Type.Optional(Type.String({ description: "Optional explicit safe vault-relative trash folder for trash_note or restore_note." })),
+  content: Type.Optional(Type.String({ description: "Explicit Markdown content for planned write operations or validate.proposed_content." })),
+  heading: Type.Optional(Type.String({ description: "Exact ATX Markdown heading for section edit operations." })),
+  property: Type.Optional(Type.String({ description: "Top-level frontmatter property for frontmatter edit operations." })),
+  value: Type.Optional(Type.Unknown({ description: "JSON-compatible value for update_frontmatter." })),
+  oldText: Type.Optional(Type.String({ description: "Exact oldText for replace_exact_text." })),
+  newText: Type.Optional(Type.String({ description: "Explicit newText for replace_exact_text; may be empty." })),
+  expectedPath: Type.Optional(Type.String({ description: "Optional explicit expected Markdown path for validate.proposed_content." })),
+  maxRelated: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: "Only for retrieve.relationships planned entries." })),
+  includeBacklinks: Type.Optional(Type.Boolean({ description: "Only for retrieve.relationships planned entries." })),
+  includeOutgoing: Type.Optional(Type.Boolean({ description: "Only for retrieve.relationships planned entries." })),
+  includeSections: Type.Optional(Type.Boolean({ description: "Only for retrieve.relationships planned entries." })),
+  dryRun: Type.Optional(Type.Boolean({ description: "Ignored by obsidian_plan; dryRun:false produces a warning and never commits." })),
+}, { additionalProperties: false, description: "One planned operation preview entry. obsidian_plan validates but never executes it." });
+
+const ObsidianPlanParams = Type.Object({
+  operations: Type.Optional(Type.Array(PlannedOperationParam, { description: "Ordered bounded array of planned operation objects." })),
+  maxOperations: Type.Optional(Type.Integer({ minimum: 1, maximum: 25, description: "Optional request-local operation limit not exceeding 25." })),
+  budget: Type.Optional(Budget),
+  explain: Type.Optional(Type.Boolean({ description: "When true, may include concise deterministic rationale within budget." })),
+}, {
+  additionalProperties: false,
+  description: "obsidian_plan arguments. Supported top-level fields only: operations, maxOperations, budget, and explain. Previews bounded ordered sequences of existing public operations without executing, committing, staging, batching, locking, rewriting links, scanning broadly, or creating commit tokens.",
+});
+
 const ObsidianManageParams = Type.Object({
   operation: Type.Optional(Type.String({ description: "Manage operation. Supported semantic values are exactly move_note, trash_note, restore_note, and copy_note; forbidden operations return safety_refusal." })),
   fromPath: Type.Optional(Type.String({ description: "For move_note and copy_note: explicit safe vault-relative Markdown source note path. obsidian_manage never infers sources from search, title, alias, or folder scans." })),
@@ -127,18 +170,19 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_retrieve",
     label: "Obsidian Retrieve",
-    description: "Retrieve ranked Obsidian note candidates, agentGuidance, bounded selected-note context, or one explicit note inspection through the official Obsidian CLI. Read-only and candidate-first except mode=note explicit-path inspection. Args: query?: string; mode?: auto|search|context|graph|project|note; path?: string for mode=note; selected?: [{path,title?}]; scope?: {folder?,tags?,properties?,recent?}; budget?: tiny|standard|expanded; maxCandidates?: 1-12; explain?: boolean. Valid examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}.",
-    promptSnippet: "Use obsidian_retrieve first for Obsidian questions. Valid budgets: tiny, standard, expanded. For explicit note inspection, pass mode=note with one safe vault-relative Markdown path.",
+    description: "Retrieve ranked Obsidian note candidates, agentGuidance, bounded selected-note context, one explicit note inspection, or one explicit-note relationship summary through the official Obsidian CLI. Read-only and candidate-first except explicit-path modes note and relationships. Args: query?: string; mode?: auto|search|context|graph|project|note|relationships; path?: string for mode=note or relationships; selected?: [{path,title?}]; scope?: {folder?,tags?,properties?,recent?}; budget?: tiny|standard|expanded; maxCandidates?: 1-12; maxRelated?: 1-50 for relationships; includeBacklinks/includeOutgoing/includeSections?: boolean for relationships; explain?: boolean. Valid examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}; relationships {\"mode\":\"relationships\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"standard\",\"maxRelated\":10}.",
+    promptSnippet: "Use obsidian_retrieve first for Obsidian questions. Valid budgets: tiny, standard, expanded. For explicit note inspection, pass mode=note with one safe vault-relative Markdown path. For safe relationship summaries, pass mode=relationships with one safe vault-relative Markdown path.",
     promptGuidelines: [
-      "Use obsidian_retrieve as the only Obsidian-facing retrieval tool; supported top-level request fields are query, mode, path, selected, scope, budget, maxCandidates, and explain.",
+      "Use obsidian_retrieve as the only Obsidian-facing retrieval tool; supported top-level request fields are query, mode, path, selected, scope, budget, maxCandidates, maxRelated, includeBacklinks, includeOutgoing, includeSections, and explain.",
       "Use obsidian_retrieve mode=search like {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"} for candidate discovery.",
       "Use obsidian_retrieve mode=graph like {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"} for bounded relationship summaries.",
       "Use obsidian_retrieve mode=context like {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"} only for exact selectedRef paths returned by prior obsidian_retrieve output.",
       "Use obsidian_retrieve mode=note like {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"} only for explicit safe vault-relative Markdown note inspection; it never dumps full content by default.",
+      "Use obsidian_retrieve mode=relationships like {\"mode\":\"relationships\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"standard\",\"maxRelated\":10} only for bounded relationship summaries around one explicit Markdown note; it never scans broadly, crawls recursively, rewrites links, or infers mutation targets.",
       "Start with candidate discovery; do not ask for broad note, folder, or vault dumps.",
       "Read agentGuidance.resultState, bestMatch, confidence, contextRecommendation, and nextActions before deciding whether to answer or call context mode.",
       "Use obsidian_retrieve mode=project with scope.folder for bounded project summaries; outputs still remain candidate-first.",
-      "obsidian_retrieve is read-only. It does not open Obsidian and does not write, append, rename, move, trash, or delete notes.",
+      "obsidian_retrieve is read-only. It does not open Obsidian and does not write, append, rename, move, trash, copy, restore, rewrite links, or delete notes.",
     ],
     parameters: ObsidianRetrieveParams,
     async execute(_toolCallId: string, params: RetrievalRequest) {
@@ -193,6 +237,27 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
         return toolResponse(setupRequiredValidationResponse(params, errors, health.warnings, preflight.path));
       }
       const result = await obsidianValidate(backend, params, { defaultBudget: config?.defaultBudget as BudgetProfile | undefined });
+      return toolResponse(result);
+    },
+  });
+
+  pi.registerTool({
+    name: "obsidian_plan",
+    label: "Obsidian Plan Preview",
+    description: "Preview a bounded ordered sequence of existing public Obsidian operations without executing anything. Read-only. Supports planned retrieve.note, retrieve.relationships, validate existing/proposed content, write create/append/create_folder, edit structured operations, and manage move/trash/restore/copy. Never commits, stages, batches, transactionally applies, creates commit tokens, writes files, rewrites links, scans broadly, opens UI, runs shell/network calls, or creates locks/reservations.",
+    promptSnippet: "Use obsidian_plan to preview a sequence of explicit safe operations before asking for individual dry-runs. It never executes or commits.",
+    promptGuidelines: [
+      "Use obsidian_plan only for bounded preview of explicit planned operations. It is read-only and cannot commit, batch-run, stage, or transactionally apply operations.",
+      "Each planned operation must mirror an existing public capability: retrieve note, retrieve.relationships, validate existing/proposed content, write create/append/create_folder, edit replace_section/insert_under_heading/update_frontmatter/remove_frontmatter/replace_exact_text, or manage move_note/trash_note/restore_note/copy_note.",
+      "Planned retrieve.relationships entries require one explicit safe vault-relative Markdown path and follow relationship safety rules: no broad backlink scan, no recursive graph expansion, no full note dump, no link rewriting, and degraded signals when data is unavailable.",
+      "dryRun:false in a planned operation is ignored and reported as a warning; obsidian_plan never passes dryRun:false to underlying tools.",
+      "Plan preview may perform only targeted checks for explicit safe paths and virtual in-memory effects. It never scans folders or the vault broadly, expands wildcards, infers destinations, rewrites links, shells out, uses network, opens UI, or creates commit tokens.",
+      "If valid=true, ask for individual existing-tool dry-runs before any commit. If valid=false, revise the plan; obsidian_plan cannot execute it.",
+    ],
+    parameters: ObsidianPlanParams,
+    async execute(_toolCallId: string, params: ObsidianPlanRequest) {
+      const config = await loadConfig(options);
+      const result = await obsidianPlan(params, { vaultRoot: config.vaultRoot });
       return toolResponse(result);
     },
   });
@@ -272,7 +337,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   });
 
   pi.registerCommand("obsidian-vault", {
-    description: "Show configured Obsidian CLI retrieval, write, structured edit, and note management status",
+    description: "Show configured Obsidian CLI retrieval, write, structured edit, note management, and plan preview status",
     handler: async (_args: string, ctx: { ui: { notify(message: string, level?: string): void } }) => {
       const backend = await backendFromOptions(options);
       const config = await loadConfig(options);
@@ -294,6 +359,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       if (writeStatus) lines.push(`Writes: ${writeStatus.writable ? "available" : "unavailable"}`);
       if (editStatus) lines.push(`obsidian_edit: ${editStatus.status}`);
       if (manageStatus) lines.push(`obsidian_manage: ${manageStatus.status}`);
+      if (capabilities.some((capability) => capability.name === "plan")) lines.push(`obsidian_plan: ${capabilities.find((capability) => capability.name === "plan")?.state ?? "unavailable"}`);
       lines.push("", "Capabilities:");
       for (const capability of capabilities) lines.push(`- ${capability.name}: ${capability.state} — ${redactStatusPath(capability.summary, config, extraSensitivePaths)}`);
       for (const error of [...(status?.errors ?? []), ...health.errors, ...(writeStatus?.errors ?? []), ...(editStatus?.errors ?? []), ...(manageStatus?.errors ?? [])]) lines.push(`Error: ${redactStatusPath(error, config, extraSensitivePaths)}`);
@@ -306,7 +372,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
 
 type CapabilityState = "available" | "degraded" | "unavailable";
 interface CapabilityRow {
-  name: "retrieve" | "write" | "edit" | "manage";
+  name: "retrieve" | "write" | "edit" | "manage" | "plan";
   state: CapabilityState;
   summary: string;
 }
@@ -335,6 +401,7 @@ function buildCapabilityRows(input: {
     { name: "write", state: writeState, summary: writeSummary },
     { name: "edit", state: input.editStatus?.status ?? "unavailable", summary: capabilitySummary("obsidian_edit", input.editStatus?.status ?? "unavailable") },
     { name: "manage", state: input.manageStatus?.status ?? "unavailable", summary: capabilitySummary("obsidian_manage", input.manageStatus?.status ?? "unavailable") },
+    { name: "plan", state: writeState === "available" ? "available" : writeState === "degraded" ? "degraded" : "unavailable", summary: writeState === "available" ? "local vault path configured for read-only operation plan preview" : writeState === "degraded" ? "local vault path is configured but plan preview targeted checks may be degraded" : "local vault path is required for targeted obsidian_plan state checks" },
   ];
 }
 
@@ -419,7 +486,7 @@ function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | u
 }
 
 function resolveOutputMode(params: RetrievalRequest): ResolvedRetrievalMode {
-  if (params.mode === "context" || params.mode === "graph" || params.mode === "project" || params.mode === "search" || params.mode === "note") return params.mode;
+  if (params.mode === "context" || params.mode === "graph" || params.mode === "project" || params.mode === "search" || params.mode === "note" || params.mode === "relationships") return params.mode;
   if (params.selected && params.selected.length > 0) return "context";
   if (params.scope?.folder) return "project";
   return "search";

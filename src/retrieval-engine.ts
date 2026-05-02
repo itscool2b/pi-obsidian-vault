@@ -4,6 +4,7 @@ import { RetrievalError } from "./errors.js";
 import { enrichCandidateMetadata, metadataCoverage } from "./metadata-enricher.js";
 import { inspectNote } from "./note-inspection.js";
 import { normalizeVaultRelativePath } from "./path-safety.js";
+import { retrieveRelationships } from "./relationship-engine.js";
 import { rankCandidates } from "./ranker.js";
 import { selectSectionsForCandidates } from "./section-selector.js";
 import { normalizeText, qualityRank } from "./query-profile.js";
@@ -21,6 +22,10 @@ export async function obsidianRetrieve(backend: ObsidianCliBackend, request: Ret
   const warnings = intentWarnings(request);
   const mode = resolveMode(request);
   const degradedSignals = new Set<DegradedSignal>();
+
+  if (mode === "relationships") {
+    return retrieveRelationships(backend, request, { defaultBudget: options.defaultBudget, budgetChars: options.budgetChars });
+  }
 
   if (mode === "note") {
     if (warnings.length > 0) {
@@ -73,7 +78,8 @@ export async function obsidianRetrieve(backend: ObsidianCliBackend, request: Ret
   return packCandidateResponse({ mode: "search", query: request.query, candidates: ranked, budget, profile, warnings, degradedSignals: [...degradedSignals] });
 }
 
-function resolveMode(request: RetrievalRequest): "search" | "context" | "graph" | "project" | "note" {
+function resolveMode(request: RetrievalRequest): "search" | "context" | "graph" | "project" | "note" | "relationships" {
+  if (request.mode === "relationships") return "relationships";
   if (request.mode === "note") return "note";
   if (request.mode === "context") return "context";
   if (request.mode === "graph") return "graph";

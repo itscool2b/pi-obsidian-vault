@@ -1,8 +1,9 @@
-export const PUBLIC_TOOL_NAMES = ["obsidian_retrieve", "obsidian_validate", "obsidian_write", "obsidian_edit", "obsidian_manage"] as const;
+export const PUBLIC_TOOL_NAMES = ["obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage"] as const;
 
 export const SUPPORTED_OPERATIONS = {
   obsidian_write: ["create", "append", "create_folder"],
   obsidian_edit: ["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"],
+  obsidian_plan: ["retrieve.note", "retrieve.relationships", "validate.existing_note", "validate.proposed_content", "write.create", "write.append", "write.create_folder", "edit.replace_section", "edit.insert_under_heading", "edit.update_frontmatter", "edit.remove_frontmatter", "edit.replace_exact_text", "manage.move_note", "manage.trash_note", "manage.restore_note", "manage.copy_note"],
   obsidian_manage: ["move_note", "trash_note", "restore_note", "copy_note"],
 } as const;
 
@@ -12,6 +13,9 @@ export const FORBIDDEN_MUTATION_CAPABILITIES = [
   "trash_folder",
   "permanent_delete",
   "batch_delete",
+  "batch_execute",
+  "commit_token",
+  "transaction_commit",
   "wildcard_delete",
   "recursive_delete",
   "rewrite_links",

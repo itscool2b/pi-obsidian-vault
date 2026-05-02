@@ -39,6 +39,9 @@ export class FakeObsidianCliBackend implements ObsidianCliBackend {
   readonly notes = new Map<string, FakeNote>();
   readonly calls: Array<{ method: string; input?: unknown }> = [];
   available = true;
+  backlinksAvailable = true;
+  backlinksLimited = false;
+  backlinkLimit = Number.POSITIVE_INFINITY;
 
   addNote(note: FakeNote): this {
     this.notes.set(note.path, note);
@@ -178,11 +181,14 @@ export class FakeObsidianCliBackend implements ObsidianCliBackend {
 
   async backlinks(input: PathCommandInput): Promise<BacklinksCommandResult> {
     this.calls.push({ method: "backlinks", input });
+    if (!this.backlinksAvailable) throw new Error("backlinks unavailable");
     const backlinks = [] as Array<{ path: string; title: string; matchedTarget: string; line: number; context: string }>;
     for (const note of this.notes.values()) {
       if ((note.links ?? []).includes(input.path)) backlinks.push({ path: note.path, title: note.title, matchedTarget: input.path, line: 1, context: `${note.title} links to ${input.path}` });
     }
-    return { path: input.path, backlinks, total: backlinks.length, limited: false };
+    const limit = Number.isFinite(this.backlinkLimit) ? this.backlinkLimit : backlinks.length;
+    const limited = this.backlinksLimited || backlinks.length > limit;
+    return { path: input.path, backlinks: backlinks.slice(0, limit), total: backlinks.length, limited };
   }
 
   async recents(): Promise<RecentsCommandResult> {

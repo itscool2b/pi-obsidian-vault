@@ -8,13 +8,13 @@ import { requireCapabilities, expectNoAbsolutePathFragments } from "./status-tes
 import { seededFakeCli } from "./fake-obsidian-cli.js";
 
 describe("/obsidian-vault capability status", () => {
-  it("shows retrieve, write, edit, and manage as available for a healthy local temp vault", async () => {
+  it("shows retrieve, write, edit, manage, and plan as available for a healthy local temp vault", async () => {
     await withTempVault(async (vaultRoot) => {
       const pi = fakePi();
       registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
       const status = await runStatusCommand(pi);
       const capabilities = requireCapabilities(status.message);
-      expect(capabilities).toEqual({ retrieve: "available", write: "available", edit: "available", manage: "available" });
+      expect(capabilities).toEqual({ retrieve: "available", write: "available", edit: "available", manage: "available", plan: "available" });
       expect(status.level).toBe("info");
       expect(status.message).toContain("Capabilities:");
       expectNoAbsolutePathFragments(status.message, [vaultRoot]);
@@ -32,6 +32,7 @@ describe("/obsidian-vault capability status", () => {
     expect(capabilities.write).toBe("unavailable");
     expect(capabilities.edit).toBe("unavailable");
     expect(capabilities.manage).toBe("unavailable");
+    expect(capabilities.plan).toBe("unavailable");
     expect(status.level).toBe("warning");
     expect(status.message).toMatch(/unavailable/);
   });
@@ -44,7 +45,7 @@ describe("/obsidian-vault capability status", () => {
       registerObsidianVault(pi as any, { backend, env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
       const status = await runStatusCommand(pi);
       const capabilities = requireCapabilities(status.message);
-      expect(capabilities).toMatchObject({ retrieve: "degraded", write: "available", edit: "available", manage: "available" });
+      expect(capabilities).toMatchObject({ retrieve: "degraded", write: "available", edit: "available", manage: "available", plan: "available" });
       expect(status.level).toBe("warning");
       expect(status.message).toContain("Warning: metadata cache is warming");
       expectNoAbsolutePathFragments(status.message, [vaultRoot]);
