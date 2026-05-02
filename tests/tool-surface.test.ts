@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { Value } from "typebox/value";
 import { describe, expect, it } from "vitest";
-import { OBSIDIAN_RETRIEVE_BUDGETS, registerObsidianVault } from "../src/index.js";
+import { OBSIDIAN_RETRIEVE_BUDGETS, OBSIDIAN_VALIDATE_TARGETS, registerObsidianVault } from "../src/index.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
 import { PUBLIC_TOOL_NAMES, SUPPORTED_OPERATIONS } from "./release-hardening-fixtures.js";
 import { requireCapabilities } from "./status-test-utils.js";
@@ -18,7 +18,7 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers obsidian_retrieve, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
+  it("registers obsidian_retrieve, obsidian_validate, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
@@ -53,6 +53,30 @@ describe("public tool surface", () => {
     expect(surfaceText).not.toContain('"include"');
   });
 
+  it("publishes a strict obsidian_validate schema for existing notes and proposed content", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const tool = pi.tools.get("obsidian_validate");
+    const schema = tool.parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["budget", "content", "expectedPath", "maxIssues", "path", "target"]);
+    expect(schema.properties.target.enum).toEqual([...OBSIDIAN_VALIDATE_TARGETS]);
+    expect(schema.properties.budget.enum).toEqual([...OBSIDIAN_RETRIEVE_BUDGETS]);
+    expect(Value.Check(schema, { target: "existing_note", path: "Projects/Plan.md" })).toBe(true);
+    expect(Value.Check(schema, { target: "proposed_content", content: "# Plan", expectedPath: "Projects/Plan.md", maxIssues: 5, budget: "tiny" })).toBe(true);
+    expect(Value.Check(schema, { target: "proposed_content", content: "# Plan", query: "x" })).toBe(false);
+    expect(Value.Check(schema, { target: "folder", path: "Projects" })).toBe(false);
+    expect(Value.Check(schema, { target: "proposed_content", content: "# Plan", maxIssues: 0 })).toBe(false);
+    const surfaceText = [tool.description, tool.promptSnippet, ...(tool.promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/existing_note/);
+    expect(surfaceText).toMatch(/proposed_content/);
+    expect(surfaceText).toMatch(/workflow-neutral/i);
+    expect(surfaceText).toMatch(/warning-severity advisory/i);
+    expect(surfaceText).toMatch(/never creates/i);
+    expect(surfaceText).not.toMatch(/template variables/i);
+  });
+
   it("publishes a strict obsidian_write schema without destination inference fields", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
@@ -71,7 +95,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/create_folder/);
     expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
     expect(surfaceText).toMatch(/overwrite/i);
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
   });
 
   it("publishes a strict obsidian_edit schema without destination inference or command fields", () => {
@@ -93,7 +117,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
     expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, restore, copy, rename, move/i);
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
   });
 
   it("publishes a strict obsidian_manage schema for move_note, trash_note, restore_note, and copy_note only", () => {

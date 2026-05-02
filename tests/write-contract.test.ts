@@ -9,7 +9,7 @@ describe("obsidian_write contract", () => {
   it("registers obsidian_write separately with strict top-level fields", async () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_validate", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
 
     const tool = pi.tools.get("obsidian_write");
     const schema = tool.parameters;
@@ -23,6 +23,7 @@ describe("obsidian_write contract", () => {
     expect(surfaceText).toMatch(/create_folder/i);
     expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
     expect(surfaceText).toMatch(/append/i);
+    expect(surfaceText).toMatch(/validation metadata/i);
     expect(surfaceText).not.toContain('"query"');
   });
 
@@ -52,18 +53,20 @@ describe("obsidian_write contract", () => {
       await seedNote(vaultRoot, "Notes/Existing.md", "# Existing");
       const append = await obsidianWrite({ operation: "append", path: "Notes/Existing.md", content: "\nAppended", dryRun: false }, { vaultRoot });
       expect(append).toMatchObject({ status: "success", operation: "append", path: "Notes/Existing.md", dryRun: false, committed: true });
+      expect(append.validation).toBeUndefined();
 
       const missing = await obsidianWrite({ operation: "append", path: "Notes/Missing.md", content: "x", dryRun: false }, { vaultRoot });
       expect(missing).toMatchObject({ status: "missing_target", error: { code: "TARGET_MISSING" }, committed: false });
       expect(missing.nextActions.map((action) => action.action)).toContain("retry_with_create");
 
       const preview = await obsidianWrite({ operation: "create", path: "Notes/Preview.md", content: "x" }, { vaultRoot });
-      expect(preview).toMatchObject({ status: "preview", dryRun: true, committed: false, preview: { wouldCreate: true, contentChars: 1 } });
+      expect(preview).toMatchObject({ status: "preview", dryRun: true, committed: false, preview: { wouldCreate: true, contentChars: 1 }, validation: { target: "proposed_content", expectedPath: "Notes/Preview.md", summary: { checkedScope: "write_create_content" } } });
       expect(preview.nextActions.map((action) => action.action)).toContain("confirm_preview");
 
       const folderPreview = await obsidianWrite({ operation: "create_folder", path: "Folders/Preview" }, { vaultRoot });
       expect(folderPreview).toMatchObject({ status: "preview", operation: "create_folder", dryRun: true, committed: false, preview: { targetKind: "folder", wouldCreateFolder: true } });
       expect(folderPreview.preview).not.toHaveProperty("contentPreview");
+      expect(folderPreview.validation).toBeUndefined();
 
       for (const result of [append, missing, preview, folderPreview]) {
         const text = stringifyDetails(result);

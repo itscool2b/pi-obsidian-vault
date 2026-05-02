@@ -1,4 +1,5 @@
 import { makeError, makeOutput, buildPreview, contentSummary, normalizeOperation } from "./write-guidance.js";
+import { validateMarkdownContent } from "./note-validation.js";
 import { LocalVaultWriter, writeErrorFromUnknown, type VaultWriter } from "./vault-writer.js";
 import type { ObsidianWriteOutput, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
 
@@ -120,6 +121,14 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
     if (dryRun) {
       const target = await writer.preview({ operation: op.operation, path: safePath, content });
       const preview = buildPreview(op.operation, safePath, content, target);
+      const validation = content && op.operation !== "create_folder"
+        ? validateMarkdownContent(content.raw, {
+          expectedPath: safePath,
+          checkedScope: op.operation === "append" ? "write_append_content" : "write_create_content",
+          extraWarnings: op.operation === "append" ? ["Append dry-run validation checked only the supplied appended content, not the complete resulting note."] : undefined,
+          extraDegradedSignals: op.operation === "append" ? ["validation_scope"] : undefined,
+        })
+        : undefined;
       return makeOutput({
         status: "preview",
         operation: op.operation,
@@ -129,6 +138,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         message: op.operation === "create_folder" ? `Dry-run preview: obsidian_write would create folder ${safePath}.` : `Dry-run preview: obsidian_write would ${op.operation} ${safePath}.`,
         target,
         preview,
+        validation,
       });
     }
 

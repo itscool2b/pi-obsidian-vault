@@ -1,4 +1,4 @@
-export const PUBLIC_TOOL_NAMES = ["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"] as const;
+export const PUBLIC_TOOL_NAMES = ["obsidian_retrieve", "obsidian_validate", "obsidian_write", "obsidian_edit", "obsidian_manage"] as const;
 
 export const SUPPORTED_OPERATIONS = {
   obsidian_write: ["create", "append", "create_folder"],

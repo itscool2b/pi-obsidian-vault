@@ -1,17 +1,19 @@
 # Pi Obsidian Vault Harness
 
-A small Pi extension for safe Obsidian vault retrieval, controlled Markdown writing, safe structured editing, and controlled single-note management.
+A small Pi extension for safe Obsidian vault retrieval, workflow-neutral Markdown validation, controlled Markdown writing, safe structured editing, and controlled single-note management.
 
 - Retrieval uses the official `obsidian`/`obsidian-cli` CLI and remains strictly read-only.
+- Validation uses one explicit existing note or explicit proposed content, remains read-only, and reports advisory workflow-neutral Markdown issues.
 - Writing uses explicit vault-relative paths under a configured local vault path and supports only Markdown create/append, folder creation, and dry-run preview.
 - Structured editing uses explicit vault-relative Markdown paths to existing notes and supports only section replacement/insertion, top-of-file frontmatter property updates/removals, and literal exact-text replacement.
 - Note management uses explicit vault-relative Markdown paths and supports only dry-run-first single-note `move_note` moves/renames, recoverable `trash_note` moves to a vault-internal trash folder, explicit `restore_note` restores from that trash folder, and byte-for-byte `copy_note` copies.
 
 ## Public tool surface
 
-The extension registers four Pi-facing tools:
+The extension registers five Pi-facing tools:
 
 - `obsidian_retrieve` — candidate-first search, selected-note context, graph summaries, project/topic retrieval, and explicit-path note inspection. Strictly read-only.
+- `obsidian_validate` — read-only validation for one explicit existing Markdown note or explicit proposed Markdown content. Validation is workflow-neutral and advisory.
 - `obsidian_write` — safe explicit-path Markdown note creation, append-only updates, and explicit folder creation. Dry-run preview is the default.
 - `obsidian_edit` — safe structured edits to existing Markdown notes. Dry-run preview is the default.
 - `obsidian_manage` — safe single-note move/rename management via `move_note`, recoverable single-note trash via `trash_note`, explicit restore from trash via `restore_note`, and byte-for-byte single-note copy via `copy_note`. Dry-run preview is the default.
@@ -25,11 +27,12 @@ It also registers the existing status command:
 1. Use `obsidian_retrieve` first to retrieve candidates with `mode: "search"`, `mode: "graph"`, or a bounded `mode: "project"` request.
 2. Read `agentGuidance`; when it recommends selected context, call `obsidian_retrieve` again with `mode: "context"` and only the exact `selectedRef` paths returned by the previous response.
 3. When the user already provides one explicit safe vault-relative Markdown note path and asks what is in that note, use `obsidian_retrieve` with `mode: "note"` and `path` for bounded structured metadata; it does not return full note content by default.
-4. Answer from retrieved context or inspection metadata when possible. Do not request a vault dump or infer a mutation target from a topic query.
-5. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
-6. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`. Manage dry-run previews may include link-impact metadata, but links are never rewritten automatically.
+4. Use `obsidian_validate` when you need read-only Markdown validation before suggesting edits or asking to commit content. Use `target: "existing_note"` with one explicit safe Markdown path, or `target: "proposed_content"` with explicit content.
+5. Answer from retrieved context, inspection metadata, or validation output when possible. Do not request a vault dump or infer a mutation target from a topic query.
+6. Use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` only after the user provides explicit safe vault-relative path(s) for the requested create/append/folder/edit/move/trash/restore/copy operation.
+7. Preview first with omitted `dryRun` or `dryRun: true`; commit only after confirmation with `dryRun: false`. Write dry-run validation metadata is advisory. Manage dry-run previews may include link-impact metadata, but links are never rewritten automatically.
 
-Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash/restore/copy intent and never performs side effects. `obsidian_write` refuses overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, `trash_note`, `restore_note`, and `copy_note`, including permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
+Legacy broad read/search/list/write/open-style tools are intentionally not registered. `obsidian_retrieve` warns on write/edit/open/move/trash/restore/copy intent and never performs side effects. `obsidian_validate` never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, creates transaction previews, creates commit tokens, or executes arbitrary commands. `obsidian_write` refuses overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, filesystem discovery, structured edit, destructive folder, and arbitrary command requests. `obsidian_edit` refuses note/folder creation, full-note overwrite, delete, trash, rename, move, restore, copy, open UI, shell, network, scan, regex/fuzzy/semantic replacement, and arbitrary command requests. `obsidian_manage` refuses everything except `move_note`, `trash_note`, `restore_note`, and `copy_note`, including permanent delete, folder delete, recursive delete/restore/copy, wildcard delete/restore/copy, bulk delete/restore/copy, non-Markdown delete/restore/copy, folder moves/restores/copies, overwrite, link rewriting, UI open, shell, network, scan, filesystem discovery, and arbitrary command requests.
 
 ## First-time setup
 
@@ -146,6 +149,34 @@ Explicit note inspection returns bounded metadata such as frontmatter keys, head
 { "mode": "note", "path": "Projects/Plan.md", "budget": "tiny" }
 ```
 
+## Validation usage examples
+
+Supported `obsidian_validate` top-level request fields are exactly: `target`, `path`, `content`, `expectedPath`, `maxIssues`, and `budget`.
+
+Supported targets are `existing_note` and `proposed_content`. Validation is read-only, bounded, redacted, advisory, and workflow-neutral. It reports objectively broken, risky, ambiguous, or agent-confusing Markdown without enforcing templates, PARA, Zettelkasten, daily-note structure, project-note structure, tags, status/date/source fields, or other methodology choices as errors.
+
+Validate one existing explicit note:
+
+```json
+{ "target": "existing_note", "path": "Projects/Plan.md", "budget": "standard" }
+```
+
+Validate proposed content without vault access:
+
+```json
+{ "target": "proposed_content", "content": "# Plan\n\nSee [Roadmap](Roadmap.md).", "budget": "tiny" }
+```
+
+Validate proposed content with a safe expected path for title/path mismatch warnings:
+
+```json
+{ "target": "proposed_content", "content": "# Different Title\n", "expectedPath": "Projects/Plan.md" }
+```
+
+Unsafe request `path` and `expectedPath` fields are blocking and use the existing path-safety rules. Absolute paths, Windows absolute paths, UNC paths, traversal, encoded traversal, hidden paths, `.obsidian` paths, wildcard-looking paths, recursive-looking paths, bulk/list-looking paths, and non-Markdown paths are refused before note content is read. Suspicious absolute-looking, Windows absolute-looking, UNC-looking, traversal-looking, and `.obsidian`-looking strings inside Markdown content are warning-severity advisory issues and do not make `valid:false` by themselves.
+
+Validation output includes stable issue codes, severities, safe messages, optional safe locations, summaries, warnings, degraded signals, and next actions. `valid:false` is reserved for error-severity validation issues or request/setup failures where no valid content validation result was produced. Warning and info issues keep `valid:true` and do not block commits.
+
 ## Write usage examples
 
 Supported `obsidian_write` top-level request fields are exactly: `operation`, `path`, `content`, and `dryRun`.
@@ -157,6 +188,8 @@ Dry-run create preview:
 ```json
 { "operation": "create", "path": "Projects/New Idea.md", "content": "# New Idea\n", "dryRun": true }
 ```
+
+Create and append dry-run previews include bounded advisory write dry-run validation metadata for the supplied Markdown content when safe. Create previews validate the supplied content with the safe target path as `expectedPath`; append previews validate the supplied appended content only in this batch and may include a `validation_scope` degraded signal. This metadata is advisory: warning/info validation issues do not block commits, and suspicious path-like strings inside content are warning-severity advisory issues.
 
 Committed create after confirmation:
 
@@ -184,7 +217,7 @@ Committed folder creation after confirmation:
 
 `create_folder` requires an explicit safe vault-relative folder path, creates missing safe parent folders only when committed, rejects `content` with `validation_error` / `CONTENT_NOT_ALLOWED`, and never creates or modifies Markdown files. Existing folders return deterministic conflict results. File-looking folder targets such as `Folder.md` or `Folder.txt`, hidden folders, `.obsidian`, absolute paths, and traversal are refused.
 
-`create` never overwrites existing notes. `append` never creates missing notes. Forbidden or unsupported operations return `safety_refusal`.
+`create` never overwrites existing notes. `append` never creates missing notes. Committed create/append behavior remains backward compatible and does not require validation metadata on success. Forbidden or unsupported operations return `safety_refusal`.
 
 ## Structured edit usage examples
 
@@ -346,13 +379,16 @@ Deterministic copy outcomes include `validation_error` / `SAME_PATH`, `SOURCE_NO
 ## Safety model and intentionally unsupported operations
 
 - `obsidian_retrieve` is read-only. It does not write, append, rename, move, trash, restore, copy, delete, open UI, run shell commands, or mutate notes.
+- `obsidian_validate` is read-only and validates only one explicit existing note or one explicit proposed Markdown payload. It never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, creates transaction previews, creates commit tokens, or executes arbitrary commands.
+- `obsidian_validate` is workflow-neutral: missing frontmatter, tags, status/date/source fields, templates, PARA, Zettelkasten, daily-note structure, project-note structure, and methodology choices are not errors.
+- Unsafe `obsidian_validate` request path fields are refused before reading; suspicious path-like strings inside Markdown content are warning-severity advisory issues and do not make `valid:false` by themselves.
 - Obsidian CLI is the retrieval discovery and metadata backend.
 - No filesystem scanning is used for retrieval discovery.
 - Note content is loaded only for selected candidates in `context` mode.
 - Retrieval responses are capped by budget and report omissions/truncation.
 - Broad vault/folder/multi-note dump requests return candidates and bounded summaries, not full note bodies.
 - CLI invocation uses argv arrays with `shell: false`.
-- `obsidian_write` is separate from retrieval and only supports Markdown create/append, folder create_folder, and dry-run preview.
+- `obsidian_write` is separate from retrieval and only supports Markdown create/append, folder create_folder, and dry-run preview. Create/append dry-run previews may include advisory validation metadata for supplied content; commits remain dry-run-confirmed and backward compatible.
 - `create_folder` creates only explicit safe vault-relative folders, rejects supplied content with `CONTENT_NOT_ALLOWED`, refuses hidden/.obsidian/traversal/absolute/extension-looking targets, and never creates or modifies Markdown files.
 - `obsidian_edit` is separate from retrieval and writing and only supports structured edits to existing Markdown notes.
 - `obsidian_manage` is separate from retrieval, writing, and editing and only supports `move_note`, `trash_note`, `restore_note`, and `copy_note` for exactly one existing Markdown note.

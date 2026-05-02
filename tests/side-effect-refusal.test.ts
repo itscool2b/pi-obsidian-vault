@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
 import { obsidianEdit } from "../src/edit-engine.js";
 import { obsidianManage } from "../src/manage-engine.js";
+import { obsidianValidate } from "../src/validation-engine.js";
 import { obsidianWrite } from "../src/write-engine.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
 import { withTempVault } from "./write-test-utils.js";
@@ -27,6 +28,21 @@ describe("side-effect refusal", () => {
     expect(noteIntent.warnings.join("\n")).toMatch(/read-only/i);
     expect(result.agentGuidance.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
     expect(backend.calls.map((call) => call.method)).not.toEqual(expect.arrayContaining(["write", "open", "append", "delete", "trash", "restore", "copy", "rename", "move", "create_folder", "move_note", "trash_note", "restore_note", "copy_note"]));
+  });
+
+  it("keeps validation advisory and refuses or ignores unsupported mutation/template intents without side effects", async () => {
+    const backend = seededFakeCli();
+    const unsafeWording = "# Plan\nCreate a template, generate a path, scan backlinks, rewrite links, open UI, run shell network command, create transaction preview, and use a commit token.";
+    const proposed = await obsidianValidate(undefined, { target: "proposed_content", content: unsafeWording, expectedPath: "Projects/Plan.md" });
+    expect(proposed.status).toBe("success");
+    expect(proposed.valid).toBe(true);
+    expect(proposed.issues.map((issue) => issue.code)).toContain("UNSAFE_OPERATION_WORDING");
+    expect(backend.calls).toEqual([]);
+
+    const existing = await obsidianValidate(backend, { target: "existing_note", path: "Research/Integrated Gradients/index.md" });
+    expect(existing.status).toBe("success");
+    expect(backend.calls.map((call) => call.method)).toEqual(["read"]);
+    expect(existing.nextActions.map((action) => action.action)).not.toEqual(expect.arrayContaining(["create_from_template", "rewrite_links", "commit_token", "open", "shell", "network", "scan"]));
   });
 
   it("returns safety_refusal for forbidden write operations", async () => {

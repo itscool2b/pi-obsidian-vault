@@ -6,23 +6,27 @@ import { editStatusFromConfig, loadConfig, manageStatusFromConfig, statusFromCon
 import { budgetForProfile } from "./context-packer.js";
 import { ObsidianCliAdapter } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
+import { obsidianValidate, setupRequiredValidationResponse } from "./validation-engine.js";
 import { obsidianEdit } from "./edit-engine.js";
 import { obsidianManage } from "./manage-engine.js";
 import { obsidianWrite } from "./write-engine.js";
 import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianCliHealth, ObsidianRetrieveOutput, ResolvedRetrievalMode, RetrievalRequest } from "./retrieval-types.js";
 import type { ObsidianEditRequest } from "./edit-types.js";
 import type { ObsidianManageRequest } from "./manage-types.js";
+import type { ObsidianValidateRequest } from "./validation-types.js";
 import type { ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
 export { loadConfig } from "./config.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
+export { obsidianValidate } from "./validation-engine.js";
 export { obsidianEdit } from "./edit-engine.js";
 export { obsidianManage } from "./manage-engine.js";
 export { obsidianWrite } from "./write-engine.js";
 export * from "./edit-types.js";
 export * from "./manage-types.js";
+export * from "./validation-types.js";
 export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
@@ -31,12 +35,16 @@ export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
 
 export const OBSIDIAN_RETRIEVE_BUDGETS = ["tiny", "standard", "expanded"] as const;
 export const OBSIDIAN_RETRIEVE_MODES = ["auto", "search", "context", "graph", "project", "note"] as const;
+export const OBSIDIAN_VALIDATE_TARGETS = ["existing_note", "proposed_content"] as const;
 
 const Budget = StringEnum(OBSIDIAN_RETRIEVE_BUDGETS, {
   description: "Response budget profile. Valid values: tiny, standard, expanded.",
 });
 const Mode = StringEnum(OBSIDIAN_RETRIEVE_MODES, {
   description: "Retrieval mode. Valid values: auto, search, context, graph, project, note.",
+});
+const ValidationTarget = StringEnum(OBSIDIAN_VALIDATE_TARGETS, {
+  description: "Validation target. Valid values: existing_note or proposed_content.",
 });
 
 const SelectedRefParam = Type.Object({
@@ -63,6 +71,18 @@ const ObsidianRetrieveParams = Type.Object({
 }, {
   additionalProperties: false,
   description: "obsidian_retrieve arguments. Supported top-level fields only: query, mode, path, selected, scope, budget, maxCandidates, explain. Valid modes: auto, search, context, graph, project, note. Valid budgets: tiny, standard, expanded. Examples: search {\"query\":\"integrated gradients\",\"mode\":\"search\",\"budget\":\"standard\"}; graph {\"query\":\"Integrated Gradients connections\",\"mode\":\"graph\",\"budget\":\"expanded\"}; context {\"mode\":\"context\",\"query\":\"implementation details\",\"selected\":[{\"path\":\"Research/Integrated Gradients/index.md\",\"title\":\"Integrated Gradients\"}],\"budget\":\"standard\"}; note {\"mode\":\"note\",\"path\":\"Research/Integrated Gradients/index.md\",\"budget\":\"tiny\"}.",
+});
+
+const ObsidianValidateParams = Type.Object({
+  target: Type.Optional(ValidationTarget),
+  path: Type.Optional(Type.String({ description: "For target=existing_note: one explicit safe vault-relative Markdown note path. No inference, folders, wildcards, traversal, hidden paths, .obsidian, bulk/list paths, or non-Markdown paths." })),
+  content: Type.Optional(Type.String({ description: "For target=proposed_content: explicit non-empty Markdown content to validate. Proposed-content validation reads no vault files." })),
+  expectedPath: Type.Optional(Type.String({ description: "Optional one explicit safe vault-relative Markdown path for path-aware advisory warnings. Unsafe values are refused before validation." })),
+  maxIssues: Type.Optional(Type.Integer({ minimum: 1, maximum: 100, description: "Positive bounded cap for returned validation issues. Errors are preferred before warning/info issues." })),
+  budget: Type.Optional(Budget),
+}, {
+  additionalProperties: false,
+  description: "obsidian_validate arguments. Supported top-level fields only: target, path, content, expectedPath, maxIssues, budget. target must be existing_note or proposed_content. existing_note reads only one explicit safe vault-relative Markdown path. proposed_content validates explicit Markdown content without vault access. Validation is read-only, bounded, redacted, workflow-neutral, and never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
 });
 
 const ObsidianWriteParams = Type.Object({
@@ -138,6 +158,46 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   });
 
   pi.registerTool({
+    name: "obsidian_validate",
+    label: "Obsidian Validate",
+    description: "Validate one explicit existing Markdown note or one explicit proposed Markdown content payload for objectively broken, risky, ambiguous, or agent-confusing Markdown. Read-only, workflow-neutral, bounded, and redacted. Supports target=existing_note with path, or target=proposed_content with content plus optional expectedPath, budget, and maxIssues. Never mutates, scans folders/vaults, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
+    promptSnippet: "Use obsidian_validate for read-only Markdown validation of one explicit note or explicit proposed content. It is advisory and workflow-neutral.",
+    promptGuidelines: [
+      "Use obsidian_validate when you need to check objectively broken, risky, ambiguous, or agent-confusing Markdown before suggesting edits or asking to commit content.",
+      "Use target=existing_note with one explicit safe vault-relative Markdown path; obsidian_validate never infers paths from query text, search results, folders, tags, recents, aliases, or note titles.",
+      "Use target=proposed_content with explicit non-empty Markdown content; proposed-content validation reads no vault files and does not require Obsidian setup.",
+      "Optional expectedPath must be one explicit safe vault-relative Markdown path and is used only for path-aware advisory warnings such as title/path mismatch.",
+      "Validation is advisory and workflow-neutral: missing frontmatter, tags, status/date/source fields, templates, PARA, Zettelkasten, daily-note structure, project-note structure, and other methodology choices are not errors.",
+      "Suspicious absolute-looking, Windows absolute-looking, UNC-looking, traversal-looking, or .obsidian-looking strings inside Markdown content are warning-severity advisory issues; unsafe request path fields are refused before validation.",
+      "Warning and info issues keep valid=true and must not block commits. valid=false is reserved for error-severity validation issues or request/setup failures where no valid content result was produced.",
+      "obsidian_validate never creates, appends, edits, moves, trashes, restores, copies, deletes, creates folders, rewrites links, scans broadly, opens UI, runs shell/network calls, generates paths, uses templates, or executes arbitrary commands.",
+      "Outputs must remain bounded and redacted: never expect full note/proposed content, vault roots, absolute paths, CLI paths, command paths, lock keys, shell details, network details, or arbitrary local filesystem details.",
+    ],
+    parameters: ObsidianValidateParams,
+    async execute(_toolCallId: string, params: ObsidianValidateRequest) {
+      if (params.target !== "existing_note") {
+        const result = await obsidianValidate(undefined, params);
+        return toolResponse(result);
+      }
+      const preflight = await obsidianValidate(undefined, params, { setupErrors: ["Validation preflight completed without configured note access."] });
+      if (preflight.status !== "setup_required") return toolResponse(preflight);
+      const config = options.backend ? undefined : await loadConfig(options);
+      if (config && config.errors.length > 0) {
+        const result = await obsidianValidate(undefined, params, { defaultBudget: config.defaultBudget as BudgetProfile | undefined, setupErrors: config.errors });
+        return toolResponse(result);
+      }
+      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config?.cliPath, vaultTarget: config?.vaultTarget, cwd: config?.vaultRoot, timeoutMs: config?.cliTimeoutMs, autoLaunch: config?.autoLaunch, launchWaitMs: config?.launchWaitMs, obsidianAppPath: config?.obsidianAppPath });
+      const health = await backend.checkHealth({ allowAutoLaunch: config?.autoLaunch ?? false });
+      if (!health.available) {
+        const errors = [...(config?.errors ?? []), ...health.errors, "Obsidian validation is unavailable. Open Obsidian manually, then retry existing-note validation."];
+        return toolResponse(setupRequiredValidationResponse(params, errors, health.warnings, preflight.path));
+      }
+      const result = await obsidianValidate(backend, params, { defaultBudget: config?.defaultBudget as BudgetProfile | undefined });
+      return toolResponse(result);
+    },
+  });
+
+  pi.registerTool({
     name: "obsidian_write",
     label: "Obsidian Write",
     description: "Create or append Markdown notes, or create folders, in Obsidian using explicit safe vault-relative paths. Separate from obsidian_retrieve and obsidian_edit. Supports operation=create, operation=append, or operation=create_folder, plus path, content for create/append only, and dryRun. dryRun defaults to true. Never overwrites, deletes, trashes, restores, copies, renames, moves, opens the UI, runs shell/network calls, scans the vault, discovers filesystem structure, or executes arbitrary CLI commands.",
@@ -148,6 +208,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "For Markdown notes, obsidian_write requires operation=create or operation=append, an explicit safe vault-relative .md path, and non-empty content; obsidian_write never infers paths from vague topic instructions.",
       "For folders, obsidian_write requires operation=create_folder and an explicit safe vault-relative folder path; omit content, because supplied content is rejected with CONTENT_NOT_ALLOWED and no file is created or modified.",
       "obsidian_write appends Markdown exactly as supplied for append; include desired leading newlines, headings, or separators in content.",
+      "obsidian_write create/append dry-run previews may include advisory validation metadata for supplied content; warning/info issues do not block commits and append validation checks only supplied appended content in this batch.",
       "obsidian_write refuses overwrite, delete, trash, restore, copy, rename, move, open UI, shell, network, scan, discovery, and arbitrary CLI requests with safety_refusal.",
       "Use obsidian_retrieve for reading/searching Obsidian; obsidian_retrieve remains read-only. Use obsidian_edit only for controlled edits to existing Markdown notes.",
     ],

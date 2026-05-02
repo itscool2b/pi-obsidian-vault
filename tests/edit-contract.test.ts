@@ -10,7 +10,7 @@ describe("obsidian_edit contract", () => {
   it("registers obsidian_edit separately with strict top-level fields", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_validate", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
 
     const tool = pi.tools.get("obsidian_edit");
     const schema = tool.parameters;
@@ -44,6 +44,7 @@ describe("obsidian_edit contract", () => {
       const tool = registerEditTool(vaultRoot);
       const preview = await tool.execute("id", { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New" });
       expect(preview.details).toMatchObject({ tool: "obsidian_edit", status: "preview", operation: "replace_section", path: "Notes/Existing.md", dryRun: true, committed: false, preview: { targetKind: "section", change: "replace" } });
+      expect(preview.details.validation).toBeUndefined();
       expect(await readNote(vaultRoot, "Notes/Existing.md")).toContain("Old");
 
       const commit = await tool.execute("id", { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New", dryRun: false });

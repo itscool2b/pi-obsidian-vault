@@ -22,9 +22,26 @@ export interface ParsedMarkdownSection {
   duplicateHeadingWarning?: DuplicateHeadingWarning | undefined;
 }
 
+export interface ParsedFrontmatterKeyLine {
+  key: string;
+  line: number;
+}
+
+export interface ParsedFrontmatterMetadata {
+  exists: boolean;
+  hasClosingDelimiter: boolean;
+  malformed: boolean;
+  nonObject: boolean;
+  startLine: number;
+  endLine?: number | undefined;
+  duplicateKeys: ParsedFrontmatterKeyLine[];
+  keyLines: ParsedFrontmatterKeyLine[];
+}
+
 export interface ParsedMarkdownNote {
   noteType?: string | undefined;
   frontmatterKeys: string[];
+  frontmatter?: ParsedFrontmatterMetadata | undefined;
   headings: HeadingSummary[];
   firstHeading?: HeadingSummary | undefined;
   duplicateHeadingWarnings: DuplicateHeadingWarning[];
@@ -43,6 +60,7 @@ interface FrontmatterParseResult {
   values: Map<string, string>;
   endLineExclusive: number;
   malformed: boolean;
+  metadata?: ParsedFrontmatterMetadata | undefined;
 }
 
 interface HeadingWithIndex extends ParsedHeading {
@@ -70,6 +88,7 @@ export function parseMarkdownNote(content: string, options: ParseMarkdownNoteOpt
   const sections = buildSections(lines, headings, duplicateByNormalized);
   const result: ParsedMarkdownNote = {
     frontmatterKeys: frontmatter.keys,
+    ...(frontmatter.metadata ? { frontmatter: frontmatter.metadata } : {}),
     headings: headings.map(toHeadingSummary),
     duplicateHeadingWarnings,
     outgoingWikiLinks,
@@ -119,17 +138,51 @@ function parseFrontmatter(lines: string[]): FrontmatterParseResult {
       break;
     }
   }
-  if (end === -1) return { keys, values, endLineExclusive: lines.length, malformed: true };
+  if (end === -1) {
+    return {
+      keys,
+      values,
+      endLineExclusive: lines.length,
+      malformed: true,
+      metadata: { exists: true, hasClosingDelimiter: false, malformed: true, nonObject: false, startLine: 1, duplicateKeys: [], keyLines: [] },
+    };
+  }
+
+  const keyLines: ParsedFrontmatterKeyLine[] = [];
+  const duplicateKeys: ParsedFrontmatterKeyLine[] = [];
+  let malformed = false;
+  let nonObject = false;
   for (let index = 1; index < end; index += 1) {
     const line = lines[index] ?? "";
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    if (/^-\s+/.test(trimmed) || /^[\[{]/.test(trimmed)) {
+      nonObject = true;
+      continue;
+    }
     const match = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line);
-    if (!match) continue;
+    if (!match) {
+      malformed = true;
+      continue;
+    }
     const key = match[1] ?? "";
-    if (!key) continue;
+    if (!key) {
+      malformed = true;
+      continue;
+    }
+    const keyLine = { key, line: index + 1 };
+    if (keyLines.some((entry) => entry.key === key)) duplicateKeys.push(keyLine);
+    keyLines.push(keyLine);
     if (!keys.includes(key)) keys.push(key);
     values.set(key, (match[2] ?? "").trim());
   }
-  return { keys, values, endLineExclusive: end + 1, malformed: false };
+  return {
+    keys,
+    values,
+    endLineExclusive: end + 1,
+    malformed,
+    metadata: { exists: true, hasClosingDelimiter: true, malformed, nonObject, startLine: 1, endLine: end + 1, duplicateKeys, keyLines },
+  };
 }
 
 function detectNoteType(values: Map<string, string>): string | undefined {

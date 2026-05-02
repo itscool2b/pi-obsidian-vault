@@ -21,6 +21,8 @@ describe("process safety", () => {
     expect(relativeFiles).toContain("src/agent-guidance.ts");
     expect(relativeFiles).toContain("src/note-inspection.ts");
     expect(relativeFiles).toContain("src/note-parser.ts");
+    expect(relativeFiles).toContain("src/validation-engine.ts");
+    expect(relativeFiles).toContain("src/note-validation.ts");
     for (const file of files) {
       const text = await readFile(file, "utf8");
       const relative = path.relative(process.cwd(), file);
@@ -43,8 +45,8 @@ describe("process safety", () => {
     }
   });
 
-  it("does not contain filesystem-first discovery calls in retrieval modules", async () => {
-    const retrievalFiles = ["src/candidate-collector.ts", "src/retrieval-engine.ts", "src/metadata-enricher.ts", "src/note-inspection.ts", "src/note-parser.ts", "src/section-selector.ts"];
+  it("does not contain filesystem-first discovery calls in retrieval or validation modules", async () => {
+    const retrievalFiles = ["src/candidate-collector.ts", "src/retrieval-engine.ts", "src/metadata-enricher.ts", "src/note-inspection.ts", "src/note-parser.ts", "src/section-selector.ts", "src/validation-engine.ts", "src/note-validation.ts"];
     for (const file of retrievalFiles) {
       const text = await readFile(path.join(process.cwd(), file), "utf8");
       expect(text).not.toMatch(/fast-glob|glob\(|readdir\(|readFile\(/);

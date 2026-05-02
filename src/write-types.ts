@@ -1,3 +1,5 @@
+import type { ValidationMetadata } from "./validation-types.js";
+
 export type ObsidianWriteOperation = "create" | "append" | "create_folder";
 export type ObsidianWriteStatus = "success" | "preview" | "validation_error" | "safety_refusal" | "conflict" | "missing_target" | "setup_required" | "write_failed";
 export type ObsidianWriteErrorCategory = "validation" | "safety" | "conflict" | "setup" | "runtime";
@@ -66,6 +68,7 @@ export interface ObsidianWriteOutput {
   message: string;
   target?: WriteTargetSummary | undefined;
   preview?: WritePreview | undefined;
+  validation?: ValidationMetadata | undefined;
   error?: ObsidianWriteError | undefined;
   warnings: string[];
   nextActions: ObsidianWriteNextAction[];

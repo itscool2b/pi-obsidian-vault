@@ -26,6 +26,7 @@ describe("shared Markdown note parser", () => {
     expect(second).toEqual(first);
     expect(first.noteType).toBe("project-note");
     expect(first.frontmatterKeys).toEqual(["type", "status", "aliases"]);
+    expect(first.frontmatter).toMatchObject({ exists: true, hasClosingDelimiter: true, malformed: false, nonObject: false, startLine: 1, endLine: 5 });
     expect(first.firstHeading).toMatchObject({ text: "Project Plan", level: 1, line: 6 });
     expect(first.headings.map((heading) => [heading.text, heading.level])).toEqual([
       ["Project Plan", 1],
@@ -58,7 +59,20 @@ describe("shared Markdown note parser", () => {
     const parsed = parseMarkdownNote("---\ntype: broken\n# Heading\nBody");
 
     expect(parsed.frontmatterKeys).toEqual([]);
+    expect(parsed.frontmatter).toMatchObject({ exists: true, hasClosingDelimiter: false, malformed: true, duplicateKeys: [] });
     expect(parsed.warnings.join("\n")).toMatch(/frontmatter/i);
     expect(parsed.degradedSignals).toEqual(["metadata", "parsing"]);
+  });
+
+  it("tracks duplicate, malformed, and non-object frontmatter signals for validation", () => {
+    const duplicate = parseMarkdownNote("---\nstatus: active\nstatus: duplicate\n---\n# Heading");
+    expect(duplicate.frontmatter?.duplicateKeys).toEqual([{ key: "status", line: 3 }]);
+    expect(duplicate.frontmatter?.keyLines).toEqual([{ key: "status", line: 2 }, { key: "status", line: 3 }]);
+
+    const malformed = parseMarkdownNote("---\nnot yaml\n---\n# Heading");
+    expect(malformed.frontmatter).toMatchObject({ malformed: true, nonObject: false });
+
+    const nonObject = parseMarkdownNote("---\n- item\n---\n# Heading");
+    expect(nonObject.frontmatter).toMatchObject({ malformed: false, nonObject: true });
   });
 });

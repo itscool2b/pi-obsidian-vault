@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { obsidianEdit } from "../src/edit-engine.js";
 import { obsidianManage } from "../src/manage-engine.js";
 import { obsidianRetrieve } from "../src/retrieval-engine.js";
+import { obsidianValidate } from "../src/validation-engine.js";
 import { obsidianWrite } from "../src/write-engine.js";
 import { FakeObsidianCliBackend } from "./fake-obsidian-cli.js";
 import { expectNoSensitivePathLeak, seedFolder, seedNote, withTempVault } from "./write-test-utils.js";
@@ -24,6 +25,22 @@ describe("release redaction regression", () => {
       expect(JSON.stringify(result)).not.toContain("/tmp/outside.md");
       expect(JSON.stringify(result)).not.toMatch(/lock|vaultRoot/i);
     }
+  });
+
+  it("keeps validation success, validation errors, safety refusals, not-found outcomes, warnings, and dry-run metadata redacted", async () => {
+    await withTempVault(async (vaultRoot) => {
+      const backend = new FakeObsidianCliBackend().addNote({ path: "Notes/Plan.md", title: "Plan", content: "# Plan\nSee C:\\Users\\me\\outside.md and [bad](../outside.md)." });
+      const success = await obsidianValidate(backend, { target: "existing_note", path: "Notes/Plan.md" });
+      const proposed = await obsidianValidate(undefined, { target: "proposed_content", content: "# Plan\nC:\\Users\\me\\outside.md", expectedPath: "Notes/Plan.md" });
+      const validation = await obsidianValidate(undefined, { target: "proposed_content", content: 42 });
+      const safety = await obsidianValidate(backend, { target: "existing_note", path: "/tmp/outside.md" });
+      const missing = await obsidianValidate(backend, { target: "existing_note", path: "Notes/Missing.md" });
+      const writePreview = await obsidianWrite({ operation: "create", path: "Notes/New.md", content: "# New\nC:\\Users\\me\\outside.md" }, { vaultRoot });
+      for (const result of [success, proposed, validation, safety, missing, writePreview.validation]) {
+        assertNoLeakedPaths(result, vaultRoot, ["/tmp/outside.md", "C:\\Users\\me\\outside.md"]);
+        expect(JSON.stringify(result)).not.toMatch(/vaultRoot|lockKey/i);
+      }
+    });
   });
 
   it("keeps write previews, successes, validation errors, safety refusals, conflicts, warnings, and next actions redacted", async () => {

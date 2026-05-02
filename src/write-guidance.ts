@@ -1,3 +1,4 @@
+import type { ValidationMetadata } from "./validation-types.js";
 import type { ObsidianWriteError, ObsidianWriteNextAction, ObsidianWriteOperation, ObsidianWriteOutput, ObsidianWriteStatus, WriteContentSummary, WritePreview, WriteTargetSummary } from "./write-types.js";
 
 const PREVIEW_CHARS = 500;
@@ -71,6 +72,7 @@ export function makeOutput(input: {
   message: string;
   target?: WriteTargetSummary | undefined;
   preview?: WritePreview | undefined;
+  validation?: ValidationMetadata | undefined;
   error?: ObsidianWriteError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianWriteNextAction[] | undefined;
@@ -88,6 +90,7 @@ export function makeOutput(input: {
   if (input.path) output.path = input.path;
   if (input.target) output.target = input.target;
   if (input.preview) output.preview = input.preview;
+  if (input.validation) output.validation = input.validation;
   if (input.error) output.error = input.error;
   return output;
 }
