@@ -1,0 +1,42 @@
+# The package.json files whitelist is the primary package boundary.
+# Keep this ignore file as a defense-in-depth publishing guard.
+
+# Dependencies
+node_modules/
+
+# Build/test output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment/secrets
+.env
+.env.*
+!.env.example
+
+# Internal planning and tests
+.specify/
+specs/
+tests/
+
+# Local vault/config/workspace data
+.pi/
+*.local
+*.secret
+
+# OS/editor/local tooling
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.cache/
+.vscode/
+.idea/

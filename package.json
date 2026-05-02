@@ -1,30 +1,55 @@
 {
   "name": "pi-obsidian-vault",
   "version": "0.1.0",
-  "private": true,
   "type": "module",
-  "description": "Pi-focused Obsidian retrieval and safe Markdown writing harness.",
+  "description": "Agent-safe Obsidian vault access for Pi: retrieve, validate, plan, and carefully mutate Markdown notes.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/itscool2b/pi-obsidian-vault.git"
+    "url": "git+https://github.com/itscool2b/pi-obsidian-vault.git"
   },
+  "bugs": {
+    "url": "https://github.com/itscool2b/pi-obsidian-vault/issues"
+  },
+  "homepage": "https://github.com/itscool2b/pi-obsidian-vault#readme",
   "keywords": [
     "pi-package",
     "pi-extension",
+    "pi",
     "obsidian",
+    "obsidian-vault",
     "vault",
-    "markdown"
+    "markdown",
+    "retrieval",
+    "validation",
+    "planning",
+    "safe-writing",
+    "safe-editing",
+    "safe-note-management",
+    "agent-safe"
   ],
   "pi": {
     "extensions": [
       "./src/index.ts"
+    ],
+    "skills": [
+      "./skills/obsidian-research"
     ]
   },
+  "files": [
+    "src/",
+    "skills/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "RELEASE.md"
+  ],
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "prepublishOnly": "npm run check"
   },
   "dependencies": {},
   "peerDependencies": {
