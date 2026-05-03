@@ -1,8 +1,8 @@
 {
   "name": "pi-obsidian-vault",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Agent-safe Obsidian vault access for Pi: retrieve, validate, plan, and carefully mutate Markdown notes.",
+  "description": "Agent-safe Obsidian vault access for Pi: auto-detect, retrieve, validate, plan, write, edit, manage, and explicitly destroy Markdown with human approval.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -26,7 +26,10 @@
     "safe-writing",
     "safe-editing",
     "safe-note-management",
-    "agent-safe"
+    "agent-safe",
+    "safe-destruction",
+    "human-approval",
+    "auto-detect"
   ],
   "pi": {
     "extensions": [

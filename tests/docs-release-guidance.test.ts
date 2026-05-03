@@ -8,85 +8,50 @@ const packageJson = JSON.parse(readText("package.json")) as {
   pi?: { extensions?: string[]; skills?: string[] };
 };
 
-const requiredConfigFields = [
-  "vaultPath",
-  "cliPath",
-  "defaultRetrieveBudget",
-  "defaultRelationshipBudget",
-  "maxPreviewChars",
-  "maxValidationIssues",
-  "defaultTrashFolder",
-  "commitTokensRequired",
-  "commitTokenTtlSeconds",
-  "commitTokenStrictMode",
-  "writeDryRunValidationEnabled",
-  "appendDryRunValidationEnabled",
-];
-
-const requiredEnvVars = [
-  "OBSIDIAN_VAULT_PATH",
-  "OBSIDIAN_CLI_PATH",
-  "OBSIDIAN_RETRIEVE_DEFAULT_BUDGET",
-  "OBSIDIAN_RELATIONSHIP_DEFAULT_BUDGET",
-  "OBSIDIAN_MAX_PREVIEW_CHARS",
-  "OBSIDIAN_VALIDATE_MAX_ISSUES",
-  "OBSIDIAN_TRASH_FOLDER",
-  "OBSIDIAN_COMMIT_TOKENS_REQUIRED",
-  "OBSIDIAN_COMMIT_TOKEN_TTL_SECONDS",
-  "OBSIDIAN_COMMIT_TOKEN_STRICT_MODE",
-  "OBSIDIAN_WRITE_DRY_RUN_VALIDATION_ENABLED",
-  "OBSIDIAN_APPEND_DRY_RUN_VALIDATION_ENABLED",
-];
-
 describe("release documentation and skill guidance", () => {
-  it("documents the public surface, operations, workflow, dry-run model, limitations, recoverable trash, restore, and copy", () => {
+  it("documents the dead-simple public surface and workflows", () => {
     const readme = readText("README.md");
     const skill = readText("skills/obsidian-research/SKILL.md");
 
-    for (const token of ["obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage", "/obsidian-vault"]) {
+    for (const token of ["obsidian_config", "obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage", "obsidian_destroy", "/obsidian-vault"]) {
       expect(readme).toContain(token);
     }
-    for (const operation of ["search", "context", "graph", "project", "relationships", "create", "append", "create_folder", "replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text", "move_note", "trash_note", "restore_note", "copy_note"]) {
+    for (const operation of ["set_vault", "forget_vault", "search", "context", "graph", "project", "relationships", "create", "append", "create_folder", "replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text", "move_note", "trash_note", "restore_note", "copy_note", "delete_note", "delete_folder", "replace_note", "empty_trash"]) {
       expect(readme).toContain(operation);
     }
 
-    expect(readme).toMatch(/Recommended agent workflow/i);
-    expect(readme).toMatch(/retrieve candidates/i);
-    expect(readme).toMatch(/selected context/i);
+    expect(readme).toMatch(/only one normal persistent setting/i);
+    expect(readme).toMatch(/vaultPath/i);
+    expect(readme).toMatch(/Auto-write this session/i);
+    expect(readme).toMatch(/Auto-destroy this session/i);
     expect(readme).toMatch(/dryRun[^\n]+true/i);
-    expect(readme).toMatch(/dryRun[^\n]+false/i);
-    expect(readme).toMatch(/unsupported operations|intentionally does not do|intentionally unsupported/i);
+    expect(readme).toMatch(/human approval/i);
     expect(readme).toMatch(/recoverable move-to-trash/i);
     expect(readme).toMatch(/not permanent deletion/i);
-    expect(readme).toMatch(/restore_note/i);
-    expect(readme).toMatch(/trashPath/i);
     expect(readme).toMatch(/TRASH_PATH_OUTSIDE_TRASH/);
-    expect(readme).toMatch(/copy_note/i);
-    expect(readme).toMatch(/byte-for-byte/i);
     expect(readme).toMatch(/SOURCE_NOT_FILE/);
+    expect(readme).toMatch(/byte-for-byte/i);
     expect(readme).toMatch(/workflow-neutral/i);
     expect(readme).toMatch(/warning-severity advisory/i);
-    expect(readme).toMatch(/write dry-run validation/i);
-    expect(readme).toMatch(/obsidian_plan/i);
     expect(readme).toMatch(/never executes|never execute/i);
-    expect(readme).toMatch(/commit tokens|confirmation tokens/i);
-    expect(readme).toMatch(/no vault-wide backlink scan|no broad vault or backlink scan/i);
+    expect(readme).toMatch(/no vault-wide backlink scan|no broad vault\/backlink scan/i);
+    expect(readme).not.toMatch(/commitToken|confirmation tokens|COMMIT_TOKEN/);
 
     expect(skill).toMatch(/candidate discovery/i);
     expect(skill).toMatch(/selectedRef/i);
-    expect(skill).toMatch(/explicit safe vault-relative/i);
+    expect(skill).toMatch(/safe vault-relative/i);
     expect(skill).toMatch(/dryRun/i);
+    expect(skill).toMatch(/obsidian_config/i);
+    expect(skill).toMatch(/obsidian_destroy/i);
     expect(skill).toMatch(/recoverable move-to-trash/i);
     expect(skill).toMatch(/restore_note/i);
     expect(skill).toMatch(/trashPath/i);
     expect(skill).toMatch(/copy_note/i);
     expect(skill).toMatch(/byte-for-byte/i);
-    expect(skill).toMatch(/obsidian_validate/i);
-    expect(skill).toMatch(/mode: "relationships"/i);
-    expect(skill).toMatch(/obsidian_plan/i);
     expect(skill).toMatch(/workflow-neutral/i);
-    expect(skill).toMatch(/warning-severity advisory/i);
-    expect(skill).toMatch(/Never use any Obsidian tool for full-note overwrite, permanent delete/i);
+    expect(skill).toMatch(/Never use non-destroy Obsidian tools for full-note overwrite, permanent delete/i);
+    expect(skill).toMatch(/Use `obsidian_destroy` only for explicit `delete_note`/i);
+    expect(skill).not.toMatch(/confirmation tokens|commit-token/i);
   });
 
   it("uses one package name consistently across public release docs", () => {
@@ -96,7 +61,7 @@ describe("release documentation and skill guidance", () => {
     const expectedInstall = `pi install npm:${packageJson.name}`;
 
     expect(packageJson.name).toBe("pi-obsidian-vault");
-    expect(packageJson.version).toBe("0.1.1");
+    expect(packageJson.version).toBe("0.2.0");
     for (const doc of [readme, changelog, release]) {
       expect(doc).toContain(packageJson.name);
       expect(doc).toContain(packageJson.version);
@@ -113,67 +78,57 @@ describe("release documentation and skill guidance", () => {
       "# Pi Obsidian Vault",
       "What it is",
       "Why it exists",
-      "What it intentionally does not do",
-      "Install",
-      "Configuration",
-      "Environment variable example",
       "Quick start",
+      "Configuration",
       "Tool overview",
+      "Recommended agent workflow",
       "Examples",
-      "Commit-token workflow",
+      "Human approval workflow",
       "Security model summary",
       "Limitations",
       "Troubleshooting",
       "Release/version info",
       "Contributing and issues",
     ];
-    for (const section of requiredSections) {
-      expect(readme).toContain(section);
-    }
+    for (const section of requiredSections) expect(readme).toContain(section);
 
     expect(readme).toMatch(/Agent-safe Obsidian vault access for Pi/i);
     expect(readme).toMatch(/not an Obsidian community plugin/i);
     expect(readme).toMatch(/not.*desktop GUI|does not.*GUI/i);
-    expect(readme).toMatch(/does \*\*not\*\* provide or enable/i);
-    expect(readme).toMatch(/Broad vault dumps/i);
     expect(readme).toMatch(/Permanent delete/i);
-    expect(readme).toMatch(/Automatic link rewriting/i);
+    expect(readme).toMatch(/Automatic link rewriting|link rewriting/i);
     expect(readme).toMatch(/Shell execution/i);
-    expect(readme).toMatch(/Configuration cannot enable those powers/i);
   });
 
-  it("documents canonical config fields, environment variables, safe fallback, token config, and redaction", () => {
+  it("documents the one-setting config model and redaction", () => {
     const readme = readText("README.md");
     const envExample = readText(".env.example");
-    for (const field of requiredConfigFields) {
-      expect(readme).toContain(field);
-    }
-    for (const envVar of requiredEnvVars) {
-      expect(readme).toContain(envVar);
-      expect(envExample).toContain(envVar);
-    }
-    expect(readme).toContain("~/.pi/agent/obsidian-vault.json");
-    expect(readme).toMatch(/Invalid values fall back or warn/i);
-    expect(readme).toMatch(/Unsafe config values do not authorize unsafe operations/i);
-    expect(readme).toMatch(/redacted from tool and status output/i);
-    expect(readme).toMatch(/commitTokenStrictMode/i);
+    expect(readme).toContain("vaultPath");
+    expect(readme).toContain("obsidian_config");
+    expect(readme).toContain("/obsidian-vault set-vault");
+    expect(readme).toMatch(/Everything else is hardcoded sane defaults/i);
+    expect(readme).toMatch(/redact/i);
+    expect(envExample).toMatch(/Normal users do not need env vars/i);
+    expect(envExample).toContain("OBSIDIAN_VAULT_PATH");
+    expect(readme).not.toContain("OBSIDIAN_RETRIEVE_DEFAULT_BUDGET");
+    expect(readme).not.toContain("OBSIDIAN_COMMIT_TOKEN");
   });
 
   it("documents security topics and reporting in README and SECURITY.md", () => {
     const readme = readText("README.md");
     const security = readText("SECURITY.md");
     for (const doc of [readme, security]) {
-      expect(doc).toMatch(/explicit.*vault-relative paths|explicit-path-only/i);
-      expect(doc).toMatch(/dry-run-first|dry-run previews|dryRun/i);
-      expect(doc).toMatch(/confirmation tokens?|commit-token/i);
+      expect(doc).toMatch(/safe.*vault-relative|vault-relative.*safe/i);
+      expect(doc).toMatch(/human approval|dryRun/i);
       expect(doc).toMatch(/read-only tools/i);
       expect(doc).toMatch(/broad vault scans|broad vault dumps/i);
       expect(doc).toMatch(/permanent delete/i);
       expect(doc).toMatch(/overwrite/i);
-      expect(doc).toMatch(/recursive, wildcard, or bulk|recursive\/wildcard\/bulk/i);
+      expect(doc).toMatch(/wildcard or bulk|recursive, wildcard, or bulk|recursive\/wildcard\/bulk/i);
       expect(doc).toMatch(/link rewriting/i);
       expect(doc).toMatch(/GUI|UI-open/i);
       expect(doc).toMatch(/redact/i);
+      expect(doc).not.toMatch(/confirmation tokens|commit-token/i);
     }
     expect(security).toMatch(/Reporting security issues/i);
     expect(security).toMatch(/controlled CLI adapter/i);
@@ -183,6 +138,7 @@ describe("release documentation and skill guidance", () => {
   it("includes safe examples for every public tool and command", () => {
     const readme = readText("README.md");
     const exampleTokens = [
+      '"operation": "set_vault"',
       '"mode": "search"',
       '"mode": "graph"',
       '"mode": "context"',
@@ -198,28 +154,16 @@ describe("release documentation and skill guidance", () => {
       '"operation": "trash_note"',
       '"operation": "restore_note"',
       '"operation": "copy_note"',
-      '"confirmationToken": "<token returned by the matching dry-run>"',
+      '"operation": "delete_note"',
+      '"operation": "delete_folder"',
+      '"operation": "replace_note"',
+      '"operation": "empty_trash"',
+      '"title": "New Idea"',
       "/obsidian-vault",
     ];
-    for (const token of exampleTokens) {
-      expect(readme).toContain(token);
-    }
+    for (const token of exampleTokens) expect(readme).toContain(token);
     expect(readme).toContain("Supported top-level request fields");
     expect(readme).toContain("Valid `budget` values: `tiny`, `standard`, `expanded`.");
-  });
-
-  it("documents changelog and release checklist completeness", () => {
-    const changelog = readText("CHANGELOG.md");
-    const release = readText("RELEASE.md");
-    for (const token of ["obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage", "commit-token", "Config polish", "Known limitations"]) {
-      expect(changelog).toMatch(new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
-    }
-    for (const command of ["npm run check", "npm pack --dry-run", "npm test -- tool-surface", "npm test -- status-capabilities", "npm test -- no-shell-network", "npm test -- side-effect-refusal", "npm test -- redaction-regression", "npm test -- validation-tool", "npm test -- validation-path-safety", "npm test -- plan-preview", "npm test -- plan-request-validation", "npm test -- plan-path-safety", "npm test -- plan-conflicts", "npm test -- plan-output-ordering", "npm test -- plan-no-mutation"]) {
-      expect(release).toContain(command);
-    }
-    expect(release).toContain("Intentionally excluded from the npm package");
-    expect(release).toContain("Exact Pi install command: `pi install npm:pi-obsidian-vault`");
-    expect(release).toContain("Exact npm publish command: `npm publish`");
   });
 
   it("keeps packaged skill manifest and docs consistent", () => {

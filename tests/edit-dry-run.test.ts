@@ -44,20 +44,20 @@ describe("obsidian_edit dry-run previews", () => {
     });
   });
 
-  it("clips long section previews without returning full note bodies", async () => {
+  it("preserves normal-sized section previews without returning full note bodies", async () => {
     await withTempVault(async (vaultRoot) => {
       await seedNote(vaultRoot, "Projects/Long.md", "# Long\n\n## Plan\n\nOld\n");
       const long = "x".repeat(900);
       const result = await obsidianEdit({ operation: "replace_section", path: "Projects/Long.md", heading: "## Plan", content: long }, { vaultRoot });
       expect(result.status).toBe("preview");
       expect(result.preview?.contentChars).toBe(900);
-      expect(result.preview?.previewTruncated).toBe(true);
-      expect((result.preview?.afterPreview?.length ?? 0)).toBeLessThan(900);
-      expect(JSON.stringify(result)).not.toContain(long);
+      expect(result.preview?.previewTruncated).toBe(false);
+      expect((result.preview?.afterPreview?.length ?? 0)).toBeGreaterThanOrEqual(900);
+      expect(JSON.stringify(result)).toContain(long);
     });
   });
 
-  it("clips exact-text previews and allows explicit empty replacement without mutation", async () => {
+  it("preserves normal-sized exact-text previews and allows explicit empty replacement without mutation", async () => {
     await withTempVault(async (vaultRoot) => {
       const oldText = `START ${"x".repeat(900)} END`;
       const original = `# Long Exact\n\nBefore\n${oldText}\nAfter\n`;
@@ -65,8 +65,8 @@ describe("obsidian_edit dry-run previews", () => {
       const result = await obsidianEdit({ operation: "replace_exact_text", path: "Projects/Long Exact.md", oldText, newText: "" }, { vaultRoot });
       expect(result.status).toBe("preview");
       expect(result.preview).toMatchObject({ targetKind: "exact_text", change: "replace", oldTextChars: oldText.length, newTextChars: 0, changedChars: -oldText.length });
-      expect(result.preview?.previewTruncated).toBe(true);
-      expect((result.preview?.oldTextPreview?.length ?? 0)).toBeLessThan(oldText.length);
+      expect(result.preview?.previewTruncated).toBe(false);
+      expect((result.preview?.oldTextPreview?.length ?? 0)).toBe(oldText.length);
       expect(await readNote(vaultRoot, "Projects/Long Exact.md")).toBe(original);
       expectNoLocalPathLeak(result, vaultRoot);
     });

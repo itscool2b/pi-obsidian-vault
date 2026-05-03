@@ -1,5 +1,3 @@
-import type { CommitTokenErrorCode, CommitTokenMetadata } from "./commit-token-types.js";
-
 export type ObsidianEditOperation = "replace_section" | "insert_under_heading" | "update_frontmatter" | "remove_frontmatter" | "replace_exact_text";
 export type ObsidianEditStatus = "success" | "preview" | "validation_error" | "safety_refusal" | "not_found" | "ambiguous" | "setup_required" | "edit_failed";
 export type ObsidianEditErrorCategory = "validation" | "safety" | "not_found" | "ambiguous" | "setup" | "runtime";
@@ -17,7 +15,6 @@ export interface ObsidianEditRequest {
   oldText?: string | undefined;
   newText?: string | undefined;
   dryRun?: boolean | undefined;
-  confirmationToken?: string | undefined;
 }
 
 export interface EditHeadingSummary {
@@ -66,7 +63,7 @@ export interface EditPreview {
 }
 
 export interface ObsidianEditError {
-  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_PATH" | "UNSAFE_PATH" | "TARGET_MISSING" | "MISSING_HEADING" | "INVALID_HEADING" | "HEADING_NOT_FOUND" | "DUPLICATE_HEADING" | "MISSING_CONTENT" | "EMPTY_CONTENT" | "MISSING_PROPERTY" | "PROPERTY_NOT_FOUND" | "DUPLICATE_PROPERTY" | "MISSING_VALUE" | "MALFORMED_FRONTMATTER" | "MISSING_OLD_TEXT" | "MISSING_NEW_TEXT" | "OLD_TEXT_NOT_FOUND" | "DUPLICATE_OLD_TEXT" | "FULL_NOTE_REPLACEMENT" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "EDIT_FAILED" | CommitTokenErrorCode;
+  code: "MISSING_OPERATION" | "UNSUPPORTED_OPERATION" | "FORBIDDEN_OPERATION" | "MISSING_PATH" | "UNSAFE_PATH" | "TARGET_MISSING" | "MISSING_HEADING" | "INVALID_HEADING" | "HEADING_NOT_FOUND" | "DUPLICATE_HEADING" | "MISSING_CONTENT" | "EMPTY_CONTENT" | "MISSING_PROPERTY" | "PROPERTY_NOT_FOUND" | "DUPLICATE_PROPERTY" | "MISSING_VALUE" | "MALFORMED_FRONTMATTER" | "MISSING_OLD_TEXT" | "MISSING_NEW_TEXT" | "OLD_TEXT_NOT_FOUND" | "DUPLICATE_OLD_TEXT" | "FULL_NOTE_REPLACEMENT" | "VAULT_PATH_REQUIRED" | "VAULT_NOT_ACCESSIBLE" | "VAULT_NOT_WRITABLE" | "EDIT_FAILED";
   category: ObsidianEditErrorCategory;
   message: string;
   recoverable: boolean;
@@ -86,7 +83,7 @@ export interface ObsidianEditNextAction {
   } | undefined;
 }
 
-export interface ObsidianEditOutput extends CommitTokenMetadata {
+export interface ObsidianEditOutput {
   tool: "obsidian_edit";
   status: ObsidianEditStatus;
   operation?: string | undefined;

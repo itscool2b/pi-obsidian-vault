@@ -1,7 +1,7 @@
 import type { ValidationMetadata } from "./validation-types.js";
 import type { ObsidianWriteError, ObsidianWriteNextAction, ObsidianWriteOperation, ObsidianWriteOutput, ObsidianWriteStatus, WriteContentSummary, WritePreview, WriteTargetSummary } from "./write-types.js";
 
-const PREVIEW_CHARS = 500;
+const PREVIEW_CHARS = 500_000;
 const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "truncate", "prepend", "delete", "remove", "unlink", "erase", "discard", "trash", "trash_note", "restore", "restore_note", "copy", "copy_note", "duplicate", "clone", "recycle", "rename", "move", "move_note", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "delete_folder", "remove_folder", "trash_folder", "restore_folder", "copy_folder", "rename_folder", "move_folder", "rmdir"]);
 
 export function normalizeOperation(value: string | undefined): { operation?: ObsidianWriteOperation | undefined; requested?: string | undefined; forbidden: boolean } {
@@ -77,11 +77,6 @@ export function makeOutput(input: {
   error?: ObsidianWriteError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianWriteNextAction[] | undefined;
-  tokenRequired?: boolean | undefined;
-  confirmationToken?: string | undefined;
-  tokenTtlSeconds?: number | undefined;
-  tokenExpiresAt?: string | undefined;
-  tokenPolicy?: ObsidianWriteOutput["tokenPolicy"];
 }): ObsidianWriteOutput {
   const output: ObsidianWriteOutput = {
     tool: "obsidian_write",
@@ -98,11 +93,6 @@ export function makeOutput(input: {
   if (input.preview) output.preview = input.preview;
   if (input.validation) output.validation = input.validation;
   if (input.error) output.error = input.error;
-  if (input.tokenRequired !== undefined) output.tokenRequired = input.tokenRequired;
-  if (input.confirmationToken) output.confirmationToken = input.confirmationToken;
-  if (input.tokenTtlSeconds !== undefined) output.tokenTtlSeconds = input.tokenTtlSeconds;
-  if (input.tokenExpiresAt) output.tokenExpiresAt = input.tokenExpiresAt;
-  if (input.tokenPolicy) output.tokenPolicy = input.tokenPolicy;
   return output;
 }
 
@@ -114,8 +104,8 @@ export function nextActionsFor(status: ObsidianWriteStatus, operation: string | 
       if (safeOperation) params.operation = safeOperation;
       if (path) params.path = path;
       const label = safeOperation === "create_folder"
-        ? "Ask the user to confirm, then retry obsidian_write with dryRun=false, the same explicit folder path, and the returned confirmationToken when present."
-        : "Ask the user to confirm, then retry obsidian_write with dryRun=false, the same explicit path/content, and the returned confirmationToken when present.";
+        ? "Ask the user to approve the preview before creating the folder."
+        : "Ask the user to approve the preview before changing the note.";
       return [{ priority: 1, action: "confirm_preview", label, params }];
     }
     case "success":

@@ -10,18 +10,15 @@
 
 - Search exact phrases first, then aliases, acronyms, tags, headings, dates, month names, project-progress terms, and related terms.
 - Do not claim absence after one exact search.
-- Use typo-tolerant search, but verify important claims by reading notes.
-- Use `obsidian_vault_map`, `obsidian_detect_projects`, and `obsidian_discover_project_notes` before giving up on broad project topics.
-- Use `obsidian_find_orphan_notes` for disconnected-note cleanup questions.
-- Use `obsidian_similar_notes` for related-note or possible-duplicate questions.
-- Use `obsidian_suggest_note_organization` for read-only suggestions about missing indexes, links, tags, aliases, logs, and roadmaps.
+- Use `obsidian_retrieve` candidate discovery before asking for selected context.
+- Use `mode: "relationships"` only for one explicit safe Markdown note path.
 
 ## Obsidian Signals
 
 - Aliases may appear in frontmatter as `alias` or `aliases`.
 - Tags may appear in frontmatter or as body hashtags.
 - Headings often contain milestones, phases, months, or project status.
-- Backlinks and outgoing links indicate project context.
+- Backlinks and outgoing links indicate project context when safely available.
 - Index-like notes include `index.md`, `README.md`, `overview.md`, `roadmap.md`, `MOC.md`, and `map.md`.
 
 ## Reporting
@@ -33,11 +30,11 @@ When answering from notes, report:
 - any uncertainty or missing evidence;
 - suggested follow-up searches if evidence is thin.
 
-## Safe Writes
+## Safe Mutations
 
-- Writes are disabled unless `OBSIDIAN_ALLOW_WRITE=true`.
-- V3 organization suggestions are read-only suggestions and create or modify zero files.
+- For normal changes, use `obsidian_write`, `obsidian_edit`, or `obsidian_manage` and omit `dryRun`; the extension previews internally and asks for approval.
+- `Auto-write this session` can skip prompts for the current session, but internal preview/safety checks still run.
+- For explicit destructive requests only, use `obsidian_destroy`; it uses separate destructive approval and `Auto-destroy this session`.
 - Use create-only workflows for new research notes.
 - Use append-only workflows for project logs.
-- Ask before creating missing logs or indexes.
-- Never overwrite existing content through a high-level workflow.
+- Never overwrite existing content through normal high-level workflows; full-note replacement belongs only in explicit `obsidian_destroy replace_note` requests.

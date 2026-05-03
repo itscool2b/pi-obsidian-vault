@@ -1,6 +1,6 @@
 import type { EditPreview, EditTargetSummary, EditTransformResult, ObsidianEditError, ObsidianEditNextAction, ObsidianEditOperation, ObsidianEditOutput, ObsidianEditStatus } from "./edit-types.js";
 
-const PREVIEW_CHARS = 500;
+const PREVIEW_CHARS = 500_000;
 const FORBIDDEN_OPERATIONS = new Set(["overwrite", "replace", "replace_all", "regex_replace", "replace_regex", "fuzzy_replace", "semantic_replace", "inferred_replace", "truncate", "prepend", "delete", "remove", "unlink", "erase", "discard", "trash", "trash_note", "restore", "restore_note", "copy", "copy_note", "duplicate", "clone", "recycle", "rename", "move", "move_note", "open", "launch", "shell", "bash", "exec", "command", "curl", "fetch", "network", "scan", "search", "discover", "write", "create", "append", "create_folder"]);
 
 export function normalizeEditOperation(value: string | undefined): { operation?: ObsidianEditOperation | undefined; requested?: string | undefined; forbidden: boolean } {
@@ -88,11 +88,6 @@ export function makeEditOutput(input: {
   error?: ObsidianEditError | undefined;
   warnings?: string[] | undefined;
   nextActions?: ObsidianEditNextAction[] | undefined;
-  tokenRequired?: boolean | undefined;
-  confirmationToken?: string | undefined;
-  tokenTtlSeconds?: number | undefined;
-  tokenExpiresAt?: string | undefined;
-  tokenPolicy?: ObsidianEditOutput["tokenPolicy"];
 }): ObsidianEditOutput {
   const output: ObsidianEditOutput = {
     tool: "obsidian_edit",
@@ -108,11 +103,6 @@ export function makeEditOutput(input: {
   if (input.target) output.target = input.target;
   if (input.preview) output.preview = input.preview;
   if (input.error) output.error = input.error;
-  if (input.tokenRequired !== undefined) output.tokenRequired = input.tokenRequired;
-  if (input.confirmationToken) output.confirmationToken = input.confirmationToken;
-  if (input.tokenTtlSeconds !== undefined) output.tokenTtlSeconds = input.tokenTtlSeconds;
-  if (input.tokenExpiresAt) output.tokenExpiresAt = input.tokenExpiresAt;
-  if (input.tokenPolicy) output.tokenPolicy = input.tokenPolicy;
   return output;
 }
 
@@ -125,7 +115,7 @@ export function nextActionsFor(status: ObsidianEditStatus, operation: string | u
       if (path) params.path = path;
       if (target?.heading) params.heading = `${"#".repeat(target.heading.level)} ${target.heading.text}`;
       if (target?.property) params.property = target.property.name;
-      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to confirm, then retry obsidian_edit with dryRun=false, the same explicit path and target fields, and the returned confirmationToken when present.", params }];
+      return [{ priority: 1, action: "confirm_preview", label: "Ask the user to approve the preview before editing the note.", params }];
     }
     case "success":
       return [{ priority: 1, action: "answer_success", label: "Tell the user the structured edit completed and cite the vault-relative note path." }];
@@ -134,7 +124,7 @@ export function nextActionsFor(status: ObsidianEditStatus, operation: string | u
     case "ambiguous":
       return [{ priority: 1, action: "ask_user_to_disambiguate", label: "Ask the user to choose a unique heading, property, or exact text target; do not select among duplicates automatically." }];
     case "setup_required":
-      return [{ priority: 1, action: "configure_vault_path", label: "Configure a local writable Obsidian vault path before retrying obsidian_edit." }];
+      return [{ priority: 1, action: "configure_vault_path", label: "Ask for the Obsidian vault folder path, remember it, then retry obsidian_edit." }];
     case "validation_error":
       return [{ priority: 1, action: "retry_with_path", label: "Retry with a supported operation, explicit safe Markdown path, and required heading/content, property/value, or oldText/newText fields." }];
     case "safety_refusal":

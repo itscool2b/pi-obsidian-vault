@@ -1,5 +1,3 @@
-import { defaultCommitTokenService, DISABLED_COMMIT_TOKEN_POLICY, isCommitTokenRequired, tokenFailureMessage } from "./commit-token.js";
-import type { CommitTokenBinding, CommitTokenMetadata, CommitTokenPolicy, CommitTokenService } from "./commit-token-types.js";
 import { PathSafetyError } from "./errors.js";
 import { buildCopyPreview, buildLinkImpact, buildMovePreview, buildRestorePreview, buildTrashPreview, makeManageError, makeManageOutput, normalizeManageOperation } from "./manage-guidance.js";
 import { parseMarkdownNote, sortDegradedSignals, sortWarnings } from "./note-parser.js";
@@ -9,8 +7,6 @@ import type { ObsidianManageError, ObsidianManageOperation, ObsidianManageOutput
 export interface ObsidianManageOptions {
   vaultRoot?: string | undefined;
   manager?: VaultManager | undefined;
-  tokenPolicy?: CommitTokenPolicy | undefined;
-  tokenService?: CommitTokenService | undefined;
   defaultTrashFolder?: string | undefined;
 }
 
@@ -114,7 +110,7 @@ async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, o
       operation,
       dryRun,
       message: "A local Obsidian vault path is required before obsidian_manage can run.",
-      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Configure OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json with a vaultPath before managing notes."),
+      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before managing notes."),
       warnings: [mapped.message],
     });
   }
@@ -163,13 +159,10 @@ async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, o
     });
   }
 
-  const tokenContext = manageTokenContext(options, operation, { fromPath: safeFromPath, toPath: safeToPath });
-
   try {
     if (dryRun) {
       const target = await manager.preview({ fromPath: safeFromPath, toPath: safeToPath });
       const preview = buildMovePreview(target);
-      const token = tokenMetadataForManagePreview(tokenContext);
       return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
@@ -180,13 +173,8 @@ async function handleMoveNote(request: ObsidianManageRequest, dryRun: boolean, o
         message: `Dry-run preview: obsidian_manage would move ${safeFromPath} to ${safeToPath}.`,
         target,
         preview,
-        ...token.metadata,
-        warnings: token.warnings,
       }), operation, safeFromPath);
     }
-
-    const tokenFailure = tokenFailureForManageCommit(tokenContext, request.confirmationToken, dryRun, { fromPath: safeFromPath, toPath: safeToPath });
-    if (tokenFailure) return tokenFailure;
 
     const target = await manager.commit({ fromPath: safeFromPath, toPath: safeToPath });
     return makeManageOutput({
@@ -236,7 +224,7 @@ async function handleCopyNote(request: ObsidianManageRequest, dryRun: boolean, o
       operation,
       dryRun,
       message: "A local Obsidian vault path is required before obsidian_manage can run.",
-      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Configure OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json with a vaultPath before managing notes."),
+      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before managing notes."),
       warnings: [mapped.message],
     });
   }
@@ -306,13 +294,10 @@ async function handleCopyNote(request: ObsidianManageRequest, dryRun: boolean, o
     });
   }
 
-  const tokenContext = manageTokenContext(options, operation, { fromPath: safeFromPath, toPath: safeToPath });
-
   try {
     if (dryRun) {
       const target = await manager.previewCopy({ fromPath: safeFromPath, toPath: safeToPath });
       const preview = buildCopyPreview(target);
-      const token = tokenMetadataForManagePreview(tokenContext);
       return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
@@ -323,13 +308,8 @@ async function handleCopyNote(request: ObsidianManageRequest, dryRun: boolean, o
         message: `Dry-run preview: obsidian_manage would copy ${safeFromPath} to ${safeToPath}.`,
         target,
         preview,
-        ...token.metadata,
-        warnings: token.warnings,
       }), operation, safeFromPath);
     }
-
-    const tokenFailure = tokenFailureForManageCommit(tokenContext, request.confirmationToken, dryRun, { fromPath: safeFromPath, toPath: safeToPath });
-    if (tokenFailure) return tokenFailure;
 
     const target = await manager.commitCopy({ fromPath: safeFromPath, toPath: safeToPath });
     return makeManageOutput({
@@ -369,7 +349,7 @@ async function handleTrashNote(request: ObsidianManageRequest, dryRun: boolean, 
       operation,
       dryRun,
       message: "A local Obsidian vault path is required before obsidian_manage can run.",
-      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Configure OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json with a vaultPath before managing notes."),
+      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before managing notes."),
       warnings: [mapped.message],
     });
   }
@@ -419,13 +399,11 @@ async function handleTrashNote(request: ObsidianManageRequest, dryRun: boolean, 
   }
 
   const trashPath = `${safeTrashFolder}/${safePath.split("/").at(-1) ?? safePath}`;
-  const tokenContext = manageTokenContext(options, operation, { path: safePath, trashFolder: safeTrashFolder, trashPath });
 
   try {
     if (dryRun) {
       const target = await manager.previewTrash({ path: safePath, trashFolder: safeTrashFolder, trashFolderDefaulted });
       const preview = buildTrashPreview(target);
-      const token = tokenMetadataForManagePreview(tokenContext);
       return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
@@ -437,13 +415,9 @@ async function handleTrashNote(request: ObsidianManageRequest, dryRun: boolean, 
         message: `Dry-run preview: obsidian_manage would move ${safePath} to trash at ${target.trashPath}.`,
         target,
         preview,
-        ...token.metadata,
-        warnings: [...token.warnings, ...(target.trashFolderWouldBeCreated ? [`Trash folder ${safeTrashFolder} would be created only if dryRun=false is explicitly supplied.`] : [])],
+        warnings: target.trashFolderWouldBeCreated ? [`Trash folder ${safeTrashFolder} would be created only if dryRun=false is explicitly supplied.`] : [],
       }), operation, safePath);
     }
-
-    const tokenFailure = tokenFailureForManageCommit(tokenContext, request.confirmationToken, dryRun, { path: safePath, trashFolder: safeTrashFolder, trashPath });
-    if (tokenFailure) return tokenFailure;
 
     const target = await manager.commitTrash({ path: safePath, trashFolder: safeTrashFolder, trashFolderDefaulted });
     return makeManageOutput({
@@ -494,7 +468,7 @@ async function handleRestoreNote(request: ObsidianManageRequest, dryRun: boolean
       operation,
       dryRun,
       message: "A local Obsidian vault path is required before obsidian_manage can run.",
-      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Configure OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json with a vaultPath before managing notes."),
+      error: makeManageError("VAULT_PATH_REQUIRED", "setup", "Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before managing notes."),
       warnings: [mapped.message],
     });
   }
@@ -598,13 +572,10 @@ async function handleRestoreNote(request: ObsidianManageRequest, dryRun: boolean
     });
   }
 
-  const tokenContext = manageTokenContext(options, operation, { trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder });
-
   try {
     if (dryRun) {
       const target = await manager.previewRestore({ trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder, trashFolderDefaulted });
       const preview = buildRestorePreview(target);
-      const token = tokenMetadataForManagePreview(tokenContext);
       return withLinkImpact(await manager, makeManageOutput({
         status: "preview",
         operation,
@@ -616,13 +587,8 @@ async function handleRestoreNote(request: ObsidianManageRequest, dryRun: boolean
         message: `Dry-run preview: obsidian_manage would restore ${safeTrashPath} to ${safeToPath}.`,
         target,
         preview,
-        ...token.metadata,
-        warnings: token.warnings,
       }), operation, safeTrashPath);
     }
-
-    const tokenFailure = tokenFailureForManageCommit(tokenContext, request.confirmationToken, dryRun, { trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder });
-    if (tokenFailure) return tokenFailure;
 
     const target = await manager.commitRestore({ trashPath: safeTrashPath, toPath: safeToPath, trashFolder: safeTrashFolder, trashFolderDefaulted });
     return makeManageOutput({
@@ -700,7 +666,7 @@ function mapMoveFailure(error: unknown, fromPath: string, toPath: string, dryRun
       committed: false,
       message: "obsidian_manage setup is incomplete for local vault management.",
       error: makeManageError(code, "setup", mapped.message),
-      warnings: ["Configure an accessible readable and writable local vault path before retrying."],
+      warnings: ["Open Obsidian once for auto-detection, or configure an accessible readable and writable local vault path before retrying."],
     });
   }
 
@@ -794,7 +760,7 @@ function mapTrashFailure(error: unknown, safePath: string, trashFolder: string, 
       committed: false,
       message: "obsidian_manage setup is incomplete for local vault management.",
       error: makeManageError(code, "setup", mapped.message),
-      warnings: ["Configure an accessible readable and writable local vault path before retrying."],
+      warnings: ["Open Obsidian once for auto-detection, or configure an accessible readable and writable local vault path before retrying."],
     });
   }
 
@@ -891,7 +857,7 @@ function mapRestoreFailure(error: unknown, trashPath: string, toPath: string, tr
       committed: false,
       message: "obsidian_manage setup is incomplete for local vault management.",
       error: makeManageError(code, "setup", mapped.message),
-      warnings: ["Configure an accessible readable and writable local vault path before retrying."],
+      warnings: ["Open Obsidian once for auto-detection, or configure an accessible readable and writable local vault path before retrying."],
     });
   }
 
@@ -982,7 +948,7 @@ function mapCopyFailure(error: unknown, fromPath: string, toPath: string, dryRun
       committed: false,
       message: "obsidian_manage setup is incomplete for local vault management.",
       error: makeManageError(code, "setup", mapped.message),
-      warnings: ["Configure an accessible readable and writable local vault path before retrying."],
+      warnings: ["Open Obsidian once for auto-detection, or configure an accessible readable and writable local vault path before retrying."],
     });
   }
 
@@ -1036,63 +1002,6 @@ function conflictWarning(code: "SOURCE_NOT_NOTE" | "TARGET_EXISTS" | "PARENT_NOT
   }
 }
 
-interface ManageTokenContext {
-  operation: ObsidianManageOperation;
-  tokenRequired: boolean;
-  policy: CommitTokenPolicy;
-  service: CommitTokenService;
-  binding: CommitTokenBinding;
-}
-
-type ManageTokenOutputFields = Partial<Pick<ObsidianManageOutput, "fromPath" | "toPath" | "path" | "trashFolder" | "trashPath">>;
-
-function manageTokenContext(options: ObsidianManageOptions, operation: ObsidianManageOperation, bindingFields: Omit<CommitTokenBinding, "tool" | "operation" | "policyVersion" | "requirementMode">): ManageTokenContext {
-  const policy = options.tokenPolicy ?? DISABLED_COMMIT_TOKEN_POLICY;
-  const service = options.tokenService ?? defaultCommitTokenService();
-  const binding: CommitTokenBinding = {
-    tool: "obsidian_manage",
-    operation,
-    policyVersion: policy.policyVersion,
-    requirementMode: policy.requirementMode,
-    ...bindingFields,
-  };
-  return { operation, tokenRequired: isCommitTokenRequired(policy, "obsidian_manage", operation), policy, service, binding };
-}
-
-function tokenMetadataForManagePreview(context: ManageTokenContext): { metadata: CommitTokenMetadata; warnings: string[] } {
-  if (!context.tokenRequired) return { metadata: { tokenRequired: false }, warnings: [] };
-  const issued = context.service.issue(context.binding, context.policy);
-  if (!issued.ok) {
-    return {
-      metadata: {
-        tokenRequired: true,
-        tokenTtlSeconds: context.policy.ttlSeconds,
-        tokenPolicy: { mode: context.policy.requirementMode, version: context.policy.policyVersion },
-      },
-      warnings: ["Confirmation token setup is unavailable; this dry-run stayed non-mutating, but the matching commit will be refused until token support is available."],
-    };
-  }
-  return { metadata: issued.metadata, warnings: [] };
-}
-
-function tokenFailureForManageCommit(context: ManageTokenContext, confirmationToken: unknown, dryRun: boolean, fields: ManageTokenOutputFields): ObsidianManageOutput | undefined {
-  if (!context.tokenRequired) return undefined;
-  const verified = context.service.verify(confirmationToken, context.binding, context.policy);
-  if (verified.ok) return undefined;
-  return makeManageOutput({
-    status: "safety_refusal",
-    operation: context.operation,
-    ...fields,
-    dryRun,
-    committed: false,
-    message: verified.message,
-    error: makeManageError(verified.code, "safety", tokenFailureMessage(verified.code)),
-    warnings: ["Token-required management commit was refused before mutation; re-run dryRun=true and retry with the returned confirmationToken."],
-    tokenRequired: true,
-    tokenTtlSeconds: context.policy.ttlSeconds,
-    tokenPolicy: { mode: context.policy.requirementMode, version: context.policy.policyVersion },
-  });
-}
 
 function defaultTrashFolderInput(request: ObsidianManageRequest, options: ObsidianManageOptions): string {
   return request.trashFolder === undefined ? options.defaultTrashFolder ?? DEFAULT_TRASH_FOLDER : request.trashFolder;

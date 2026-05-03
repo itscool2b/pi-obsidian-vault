@@ -22,7 +22,7 @@ describe("release hardening temporary-vault smoke", () => {
     };
 
     expect(packageJson.name).toBe("pi-obsidian-vault");
-    expect(packageJson.version).toBe("0.1.1");
+    expect(packageJson.version).toBe("0.2.0");
     expect(Object.hasOwn(packageJson, "private")).toBe(false);
     expect(packageJson.description).toMatch(/Agent-safe Obsidian vault access for Pi/i);
     expect(packageJson.license).toBe("MIT");
@@ -55,8 +55,8 @@ describe("release hardening temporary-vault smoke", () => {
       expect(doc).toMatch(/Real-vault.*opt-in|real-vault.*manual/i);
       expect(doc).not.toMatch(/run committed smoke tests against a real vault by default/i);
       expect(doc).toMatch(/no-overwrite|No overwrite/i);
-      expect(doc).toMatch(/dry-run-first|Dry-run-first/i);
-      expect(doc).toMatch(/token/i);
+      expect(doc).toMatch(/human approval|dryRun|dry-run/i);
+      expect(doc).toMatch(/auto-write|approval/i);
       expect(doc).toMatch(/redact/i);
       expect(doc).toMatch(/no-shell\/network|shell\/network/i);
       expect(doc).toMatch(/no-broad-scan|broad vault scan/i);
@@ -107,7 +107,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(previewSection).toMatchObject({ status: "preview", dryRun: true, committed: false });
       expect(await readNote(vaultRoot, notePath)).toContain("Old section text.");
 
-      const commitSection = await executeTool<ObsidianEditOutput>(pi, "obsidian_edit", { operation: "replace_section", path: notePath, heading: "## Section", content: "Updated section text.", dryRun: false, confirmationToken: previewSection.confirmationToken });
+      const commitSection = await executeTool<ObsidianEditOutput>(pi, "obsidian_edit", { operation: "replace_section", path: notePath, heading: "## Section", content: "Updated section text.", dryRun: false });
       expect(commitSection).toMatchObject({ status: "success", dryRun: false, committed: true });
       expect(await readNote(vaultRoot, notePath)).toContain("Updated section text.");
 
@@ -115,7 +115,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(previewExact).toMatchObject({ status: "preview", dryRun: true, committed: false });
       expect(await readNote(vaultRoot, notePath)).toContain("Append marker: alpha.");
 
-      const commitExact = await executeTool<ObsidianEditOutput>(pi, "obsidian_edit", { operation: "replace_exact_text", path: notePath, oldText: "Append marker: alpha.", newText: "Append marker: beta.", dryRun: false, confirmationToken: previewExact.confirmationToken });
+      const commitExact = await executeTool<ObsidianEditOutput>(pi, "obsidian_edit", { operation: "replace_exact_text", path: notePath, oldText: "Append marker: alpha.", newText: "Append marker: beta.", dryRun: false });
       expect(commitExact).toMatchObject({ status: "success", dryRun: false, committed: true });
       expect(await readNote(vaultRoot, notePath)).toContain("Append marker: beta.");
 
@@ -133,7 +133,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(previewMove).toMatchObject({ status: "preview", dryRun: true, committed: false });
       expect(await pathExists(vaultRoot, movedPath)).toBe(false);
 
-      const commitMove = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "move_note", fromPath: notePath, toPath: movedPath, dryRun: false, confirmationToken: previewMove.confirmationToken });
+      const commitMove = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "move_note", fromPath: notePath, toPath: movedPath, dryRun: false });
       expect(commitMove).toMatchObject({ status: "success", dryRun: false, committed: true });
       expect(await pathExists(vaultRoot, notePath)).toBe(false);
       expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
@@ -143,7 +143,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await pathExists(vaultRoot, movedPath)).toBe(true);
       expect(await pathExists(vaultRoot, trashPath)).toBe(false);
 
-      const commitTrash = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "trash_note", path: movedPath, dryRun: false, confirmationToken: previewTrash.confirmationToken });
+      const commitTrash = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "trash_note", path: movedPath, dryRun: false });
       expect(commitTrash).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath });
       expect(await pathExists(vaultRoot, movedPath)).toBe(false);
       expect(await readNote(vaultRoot, trashPath)).toBe(beforeMoveContent);
@@ -153,7 +153,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await pathExists(vaultRoot, trashPath)).toBe(true);
       expect(await pathExists(vaultRoot, movedPath)).toBe(false);
 
-      const commitRestore = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "restore_note", trashPath, toPath: movedPath, dryRun: false, confirmationToken: previewRestore.confirmationToken });
+      const commitRestore = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "restore_note", trashPath, toPath: movedPath, dryRun: false });
       expect(commitRestore).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath, toPath: movedPath });
       expect(await pathExists(vaultRoot, trashPath)).toBe(false);
       expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
@@ -163,7 +163,7 @@ describe("release hardening temporary-vault smoke", () => {
       expect(await pathExists(vaultRoot, copyPath)).toBe(false);
       expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
 
-      const commitCopy = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "copy_note", fromPath: movedPath, toPath: copyPath, dryRun: false, confirmationToken: previewCopy.confirmationToken });
+      const commitCopy = await executeTool<ObsidianManageOutput>(pi, "obsidian_manage", { operation: "copy_note", fromPath: movedPath, toPath: copyPath, dryRun: false });
       expect(commitCopy).toMatchObject({ status: "success", dryRun: false, committed: true, fromPath: movedPath, toPath: copyPath, target: { sourceExistsAfter: true, destinationExistsAfter: true, bytesPreserved: true } });
       expect(await readNote(vaultRoot, movedPath)).toBe(beforeMoveContent);
       expect(await readNote(vaultRoot, copyPath)).toBe(beforeMoveContent);
@@ -174,8 +174,8 @@ describe("release hardening temporary-vault smoke", () => {
       expect(unexpectedFakeCliSideEffectCalls(backend)).toEqual([]);
 
       const status = await runStatusCommand(pi);
-      const capabilities = requireCapabilities(status.message);
-      expect(capabilities).toMatchObject({ retrieve: "available", write: "available", edit: "available", manage: "available" });
+      expect(status.message).toContain("Obsidian Vault: ready");
+      expect(status.message).toContain("Vault: dev override");
       expect(status.message).not.toContain(vaultRoot);
       expect(status.message).not.toMatch(/\/tmp\/pi-obsidian-write-/);
 

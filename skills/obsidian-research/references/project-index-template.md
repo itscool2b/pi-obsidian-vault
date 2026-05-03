@@ -43,5 +43,5 @@ Current phase, month, milestone, or blocker.
 
 ## Discovery / Organization Notes
 
-When using v3 discovery tools, review read-only suggestions for missing index notes, project overview notes, logs, roadmaps, aliases, tags, and links before writing anything.
+When using `obsidian_retrieve` search, graph, or project modes, review read-only suggestions for missing index notes, project overview notes, logs, roadmaps, aliases, tags, and links before writing anything.
 ```

@@ -7,20 +7,20 @@ export function budgetForProfile(profile: BudgetProfile | undefined, overrides?:
   const totals: Record<BudgetProfile, number> = {
     tiny: overrides?.tiny ?? 3_500,
     standard: overrides?.standard ?? 8_000,
-    expanded: overrides?.expanded ?? 12_000,
+    expanded: overrides?.expanded ?? 80_000,
   };
-  const totalChars = Math.min(12_000, totals[resolved]);
+  const totalChars = Math.min(200_000, totals[resolved]);
   return {
-    candidateLimit: resolved === "tiny" ? 5 : resolved === "standard" ? 8 : 12,
-    seedLimit: resolved === "tiny" ? 25 : 60,
-    previewChars: resolved === "tiny" ? 160 : 240,
-    metadataItems: resolved === "tiny" ? 4 : 8,
-    selectedNoteLimit: resolved === "expanded" ? 3 : 2,
-    sectionsPerNote: resolved === "expanded" ? 4 : 3,
-    sectionChars: resolved === "tiny" ? 500 : 900,
-    perNoteChars: resolved === "tiny" ? 1_000 : resolved === "standard" ? 2_400 : 3_500,
+    candidateLimit: resolved === "tiny" ? 5 : resolved === "standard" ? 8 : 32,
+    seedLimit: resolved === "tiny" ? 25 : resolved === "standard" ? 60 : 500,
+    previewChars: resolved === "tiny" ? 160 : resolved === "standard" ? 240 : 1_000,
+    metadataItems: resolved === "tiny" ? 4 : resolved === "standard" ? 8 : 24,
+    selectedNoteLimit: resolved === "expanded" ? 8 : 2,
+    sectionsPerNote: resolved === "expanded" ? 10 : 3,
+    sectionChars: resolved === "tiny" ? 500 : resolved === "standard" ? 900 : 4_000,
+    perNoteChars: resolved === "tiny" ? 1_000 : resolved === "standard" ? 2_400 : 20_000,
     graphDepth: resolved === "expanded" ? 2 : 1,
-    graphNeighbors: resolved === "tiny" ? 4 : 8,
+    graphNeighbors: resolved === "tiny" ? 4 : resolved === "standard" ? 8 : 32,
     totalChars,
   };
 }

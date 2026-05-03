@@ -97,25 +97,25 @@ export function fakePi() {
 
 export function registerWriteTool(vaultRoot: string) {
   const pi = fakePi();
-  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
   return pi.tools.get("obsidian_write");
 }
 
 export function registerEditTool(vaultRoot: string) {
   const pi = fakePi();
-  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
   return pi.tools.get("obsidian_edit");
 }
 
 export function registerManageTool(vaultRoot: string) {
   const pi = fakePi();
-  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
   return pi.tools.get("obsidian_manage");
 }
 
 export function registerVaultExtensionForTest(vaultRoot: string, backend: FakeObsidianCliBackend = seededFakeCli()) {
   const pi = fakePi();
-  registerObsidianVault(pi as any, { backend, env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+  registerObsidianVault(pi as any, { backend, env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
   return { pi, backend };
 }
 

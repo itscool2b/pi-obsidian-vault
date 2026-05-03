@@ -9,12 +9,12 @@ describe("obsidian_manage contract", () => {
   it("registers obsidian_manage separately with strict top-level fields", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
-    expect([...pi.tools.keys()]).toEqual(["obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage"]);
+    expect([...pi.tools.keys()]).toEqual(["obsidian_config", "obsidian_retrieve", "obsidian_validate", "obsidian_plan", "obsidian_write", "obsidian_edit", "obsidian_manage", "obsidian_destroy"]);
 
     const tool = pi.tools.get("obsidian_manage");
     const schema = tool.parameters;
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md" })).toBe(true);
@@ -35,14 +35,10 @@ describe("obsidian_manage contract", () => {
     expect(surfaceText).toMatch(/toPath/);
     expect(surfaceText).toMatch(/trashPath/);
     expect(surfaceText).toMatch(/trashFolder/);
-    expect(surfaceText).toMatch(/_Trash/);
     expect(surfaceText).toMatch(/dryRun/i);
-    expect(surfaceText).toMatch(/PARENT_MISSING/);
-    expect(surfaceText).toMatch(/TRASH_TARGET_EXISTS/);
-    expect(surfaceText).toMatch(/PARENT_MISSING/);
-    expect(surfaceText).toMatch(/byte/i);
+    expect(surfaceText).toMatch(/approval|human/i);
     expect(surfaceText).toMatch(/overwrite/i);
-    expect(surfaceText).toMatch(/folder moves/i);
+    expect(surfaceText).toMatch(/folders/i);
     expect(surfaceText).not.toContain('"query"');
   });
 
@@ -57,8 +53,8 @@ describe("obsidian_manage contract", () => {
       expect(preview.content[0].text).toContain('"status": "preview"');
       expectNoLocalPathLeak(preview.details, vaultRoot);
 
-      expect(preview.details.confirmationToken).toEqual(expect.any(String));
-      const commit = await tool.execute("id", { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false, confirmationToken: preview.details.confirmationToken });
+      expect(preview.details.confirmationToken).toBeUndefined();
+      const commit = await tool.execute("id", { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, target: { sourceExistsAfter: false, destinationExistsAfter: true } });
       expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
@@ -75,8 +71,8 @@ describe("obsidian_manage contract", () => {
       expect(preview.content[0].text).toContain('"operation": "trash_note"');
       expectNoLocalPathLeak(preview.details, vaultRoot);
 
-      expect(preview.details.confirmationToken).toEqual(expect.any(String));
-      const commit = await tool.execute("id", { operation: "trash_note", path: "Projects/Plan.md", dryRun: false, confirmationToken: preview.details.confirmationToken });
+      expect(preview.details.confirmationToken).toBeUndefined();
+      const commit = await tool.execute("id", { operation: "trash_note", path: "Projects/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath: "_Trash/Plan.md", target: { sourceExistsAfter: false, trashTargetExistsAfter: true } });
       expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
@@ -94,8 +90,8 @@ describe("obsidian_manage contract", () => {
       expect(preview.content[0].text).toContain('"operation": "restore_note"');
       expectNoLocalPathLeak(preview.details, vaultRoot);
 
-      expect(preview.details.confirmationToken).toEqual(expect.any(String));
-      const commit = await tool.execute("id", { operation: "restore_note", trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", dryRun: false, confirmationToken: preview.details.confirmationToken });
+      expect(preview.details.confirmationToken).toBeUndefined();
+      const commit = await tool.execute("id", { operation: "restore_note", trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, trashPath: "_Trash/Plan.md", toPath: "Projects/Plan.md", target: { trashSourceExistsAfter: false, destinationExistsAfter: true } });
       expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);
@@ -113,8 +109,8 @@ describe("obsidian_manage contract", () => {
       expect(preview.content[0].text).toContain('"operation": "copy_note"');
       expectNoLocalPathLeak(preview.details, vaultRoot);
 
-      expect(preview.details.confirmationToken).toEqual(expect.any(String));
-      const commit = await tool.execute("id", { operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false, confirmationToken: preview.details.confirmationToken });
+      expect(preview.details.confirmationToken).toBeUndefined();
+      const commit = await tool.execute("id", { operation: "copy_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false });
       expect(commit.details).toMatchObject({ status: "success", dryRun: false, committed: true, fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", target: { sourceExistsAfter: true, destinationExistsAfter: true, bytesPreserved: true } });
       expect(commit.details.linkImpact).toBeUndefined();
       expectNoLocalPathLeak(commit.details, vaultRoot);

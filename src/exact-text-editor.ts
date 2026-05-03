@@ -1,7 +1,7 @@
 import { clipEditPreview } from "./edit-guidance.js";
 import type { EditTransformResult } from "./edit-types.js";
 
-const CONTEXT_CHARS = 500;
+const CONTEXT_CHARS = 20_000;
 
 export class ExactTextEditError extends Error {
   constructor(message: string, public readonly code: "OLD_TEXT_NOT_FOUND" | "DUPLICATE_OLD_TEXT" | "FULL_NOTE_REPLACEMENT", public readonly details?: Record<string, unknown> | undefined) {

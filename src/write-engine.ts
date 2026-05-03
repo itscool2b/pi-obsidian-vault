@@ -1,15 +1,11 @@
-import { defaultCommitTokenService, DISABLED_COMMIT_TOKEN_POLICY, hashTokenField, isCommitTokenRequired, tokenFailureMessage } from "./commit-token.js";
-import type { CommitTokenBinding, CommitTokenMetadata, CommitTokenPolicy, CommitTokenService } from "./commit-token-types.js";
 import { makeError, makeOutput, buildPreview, contentSummary, normalizeOperation } from "./write-guidance.js";
 import { validateMarkdownContent } from "./note-validation.js";
 import { LocalVaultWriter, writeErrorFromUnknown, type VaultWriter } from "./vault-writer.js";
-import type { ObsidianWriteOutput, ObsidianWriteOperation, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
+import type { ObsidianWriteOutput, ObsidianWriteRequest, WriteContentSummary } from "./write-types.js";
 
 export interface ObsidianWriteOptions {
   vaultRoot?: string | undefined;
   writer?: VaultWriter | undefined;
-  tokenPolicy?: CommitTokenPolicy | undefined;
-  tokenService?: CommitTokenService | undefined;
   maxPreviewChars?: number | undefined;
   writeDryRunValidationEnabled?: boolean | undefined;
   appendDryRunValidationEnabled?: boolean | undefined;
@@ -43,14 +39,15 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
     });
   }
 
-  if (!request.path?.trim()) {
+  const requestedPath = request.path !== undefined ? request.path.trim() : op.operation === "create" ? inferCreatePath(request) : undefined;
+  if (!requestedPath) {
     return makeOutput({
       status: "validation_error",
       operation: op.operation,
       dryRun,
       committed: false,
-      message: op.operation === "create_folder" ? "obsidian_write create_folder requires an explicit vault-relative folder path." : "obsidian_write requires an explicit vault-relative Markdown path.",
-      error: makeError("MISSING_PATH", "validation", op.operation === "create_folder" ? "Provide an explicit safe vault-relative folder path; obsidian_write will not infer one." : "Provide an explicit safe vault-relative Markdown path; obsidian_write will not infer one."),
+      message: op.operation === "create_folder" ? "obsidian_write create_folder requires a vault-relative folder path." : "obsidian_write needs a vault-relative Markdown path or a title it can turn into one.",
+      error: makeError("MISSING_PATH", "validation", op.operation === "create_folder" ? "Provide a safe vault-relative folder path." : "Provide path or title for a new Markdown note."),
     });
   }
 
@@ -103,14 +100,14 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       dryRun,
       committed: false,
       message: "A local Obsidian vault path is required before obsidian_write can run.",
-      error: makeError("VAULT_PATH_REQUIRED", "setup", "Configure OBSIDIAN_VAULT_PATH or ~/.pi/agent/obsidian-vault.json with a vaultPath before writing."),
+      error: makeError("VAULT_PATH_REQUIRED", "setup", "Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before writing."),
       warnings: [mapped.message],
     });
   }
 
   let safePath: string;
   try {
-    safePath = writer.normalizePath(request.path, op.operation);
+    safePath = writer.normalizePath(requestedPath, op.operation);
   } catch (error) {
     const mapped = writeErrorFromUnknown(error);
     return makeOutput({
@@ -123,11 +120,6 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
       warnings: ["Unsafe path refused; no note or folder was changed."],
     });
   }
-
-  const policy = options.tokenPolicy ?? DISABLED_COMMIT_TOKEN_POLICY;
-  const tokenRequired = isCommitTokenRequired(policy, "obsidian_write", op.operation);
-  const tokenService = options.tokenService ?? defaultCommitTokenService();
-  const tokenBinding = buildWriteTokenBinding(policy, op.operation, safePath, content);
 
   try {
     if (dryRun) {
@@ -142,7 +134,6 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
           extraDegradedSignals: op.operation === "append" ? ["validation_scope"] : undefined,
         })
         : undefined;
-      const token = tokenMetadataForPreview(tokenRequired, tokenService, tokenBinding, policy);
       return makeOutput({
         status: "preview",
         operation: op.operation,
@@ -153,29 +144,9 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         target,
         preview,
         validation,
-        ...token.metadata,
-        warnings: token.warnings,
       });
     }
 
-    if (tokenRequired) {
-      const verified = tokenService.verify(request.confirmationToken, tokenBinding, policy);
-      if (!verified.ok) {
-        return makeOutput({
-          status: "safety_refusal",
-          operation: op.operation,
-          path: safePath,
-          dryRun,
-          committed: false,
-          message: verified.message,
-          error: makeError(verified.code, "safety", tokenFailureMessage(verified.code)),
-          warnings: ["Token-required commit was refused before mutation; re-run dryRun=true and retry with the returned confirmationToken."],
-          tokenRequired: true,
-          tokenTtlSeconds: policy.ttlSeconds,
-          tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
-        });
-      }
-    }
 
     const target = await writer.commit({ operation: op.operation, path: safePath, content });
     return makeOutput({
@@ -271,7 +242,7 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
         committed: false,
         message: "obsidian_write setup is incomplete for local vault writes.",
         error: makeError(code, "setup", mapped.message),
-        warnings: ["Configure an accessible writable local vault path before retrying."],
+        warnings: ["Open Obsidian once for auto-detection, or tell me your Obsidian vault folder path and I can remember it before retrying."],
       });
     }
     return makeOutput({
@@ -287,33 +258,33 @@ export async function obsidianWrite(request: ObsidianWriteRequest, options: Obsi
   }
 }
 
-function buildWriteTokenBinding(policy: CommitTokenPolicy, operation: ObsidianWriteOperation, safePath: string, content: WriteContentSummary | undefined): CommitTokenBinding {
-  const binding: CommitTokenBinding = {
-    tool: "obsidian_write",
-    operation,
-    policyVersion: policy.policyVersion,
-    requirementMode: policy.requirementMode,
-    path: safePath,
-  };
-  if (content) {
-    binding.contentHash = hashTokenField(content.raw);
-    binding.contentLength = content.chars;
-  }
-  return binding;
+function inferCreatePath(request: ObsidianWriteRequest): string | undefined {
+  const title = request.title?.trim() || headingFromMarkdown(request.content) || fallbackTitleFromContent(request.content);
+  const fileName = titleToFileName(title);
+  if (!fileName) return undefined;
+  const folder = request.folderHint?.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return folder ? `${folder}/${fileName}` : fileName;
 }
 
-function tokenMetadataForPreview(tokenRequired: boolean, tokenService: CommitTokenService, binding: CommitTokenBinding, policy: CommitTokenPolicy): { metadata: CommitTokenMetadata; warnings: string[] } {
-  if (!tokenRequired) return { metadata: { tokenRequired: false }, warnings: [] };
-  const issued = tokenService.issue(binding, policy);
-  if (!issued.ok) {
-    return {
-      metadata: {
-        tokenRequired: true,
-        tokenTtlSeconds: policy.ttlSeconds,
-        tokenPolicy: { mode: policy.requirementMode, version: policy.policyVersion },
-      },
-      warnings: ["Confirmation token setup is unavailable; this dry-run stayed non-mutating, but the matching commit will be refused until token support is available."],
-    };
-  }
-  return { metadata: issued.metadata, warnings: [] };
+function headingFromMarkdown(content: string | undefined): string | undefined {
+  if (!content) return undefined;
+  const line = content.split(/\r?\n/u).find((candidate) => /^#{1,6}\s+\S/.test(candidate.trim()));
+  return line?.replace(/^#{1,6}\s+/u, "").replace(/\s+#+\s*$/u, "").trim() || undefined;
+}
+
+function fallbackTitleFromContent(content: string | undefined): string | undefined {
+  const clean = content?.replace(/[`*_>#\-[\]]/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean) return undefined;
+  return clean.split(" ").slice(0, 8).join(" ");
+}
+
+function titleToFileName(title: string | undefined): string | undefined {
+  const clean = title
+    ?.normalize("NFKD")
+    .replace(/[\\/:*?"<>|#^[\]\r\n\t]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  if (!clean) return undefined;
+  return clean.endsWith(".md") ? clean : `${clean}.md`;
 }

@@ -18,7 +18,7 @@ function fakePi() {
 }
 
 describe("public tool surface", () => {
-  it("registers obsidian_retrieve, obsidian_validate, obsidian_plan, obsidian_write, obsidian_edit, obsidian_manage, and the existing status command", () => {
+  it("registers obsidian_config plus the Obsidian vault tools and status command", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
@@ -30,6 +30,7 @@ describe("public tool surface", () => {
     expect(SUPPORTED_OPERATIONS.obsidian_edit).toEqual(["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"]);
     expect(SUPPORTED_OPERATIONS.obsidian_plan).toEqual(["retrieve.note", "retrieve.relationships", "validate.existing_note", "validate.proposed_content", "write.create", "write.append", "write.create_folder", "edit.replace_section", "edit.insert_under_heading", "edit.update_frontmatter", "edit.remove_frontmatter", "edit.replace_exact_text", "manage.move_note", "manage.trash_note", "manage.restore_note", "manage.copy_note"]);
     expect(SUPPORTED_OPERATIONS.obsidian_manage).toEqual(["move_note", "trash_note", "restore_note", "copy_note"]);
+    expect(SUPPORTED_OPERATIONS.obsidian_destroy).toEqual(["delete_note", "delete_folder", "replace_note", "empty_trash"]);
   });
 
   it("publishes a strict, example-driven obsidian_retrieve schema without unsupported agent-style fields", () => {
@@ -94,27 +95,28 @@ describe("public tool surface", () => {
     const surfaceText = [tool.description, tool.promptSnippet, ...(tool.promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/never executes|never commits/i);
     expect(surfaceText).toMatch(/retrieve\.relationships/);
-    expect(surfaceText).toMatch(/commit tokens/i);
+    expect(surfaceText).toMatch(/writes files/i);
     expect(surfaceText).toMatch(/no broad backlink scan/i);
   });
 
-  it("publishes a strict obsidian_write schema without destination inference fields", () => {
+  it("publishes a simple obsidian_write schema with title-based path inference", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     const schema = pi.tools.get("obsidian_write").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "content", "dryRun", "operation", "path"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "folderHint", "operation", "path", "title"]);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New" })).toBe(true);
     expect(Value.Check(schema, { operation: "append", path: "Notes/New.md", content: "More", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "create_folder", path: "Projects/New Area", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "create", title: "New", folderHint: "Notes", content: "# New" })).toBe(true);
     expect(Value.Check(schema, { operation: "create", path: "Notes/New.md", content: "# New", query: "somewhere" })).toBe(false);
     const surfaceText = [pi.tools.get("obsidian_write").description, pi.tools.get("obsidian_write").promptSnippet, ...(pi.tools.get("obsidian_write").promptGuidelines ?? [])].join("\n");
     expect(surfaceText).toMatch(/dryRun/i);
-    expect(surfaceText).toMatch(/explicit/i);
+    expect(surfaceText).toMatch(/infer|title/i);
     expect(surfaceText).toMatch(/append/i);
-    expect(surfaceText).toMatch(/create_folder/);
-    expect(surfaceText).toMatch(/CONTENT_NOT_ALLOWED/);
+    expect(surfaceText).toMatch(/create folder/i);
+    expect(surfaceText).toMatch(/approval|human/i);
     expect(surfaceText).toMatch(/overwrite/i);
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
   });
@@ -125,7 +127,7 @@ describe("public tool surface", () => {
     const schema = pi.tools.get("obsidian_edit").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "content", "dryRun", "heading", "newText", "oldText", "operation", "path", "property", "value"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "heading", "newText", "oldText", "operation", "path", "property", "value"]);
     expect(Value.Check(schema, { operation: "replace_section", path: "Notes/Existing.md", heading: "## Plan", content: "New" })).toBe(true);
     expect(Value.Check(schema, { operation: "update_frontmatter", path: "Notes/Existing.md", property: "status", value: "reviewed", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "replace_exact_text", path: "Notes/Existing.md", oldText: "Old", newText: "New", dryRun: false })).toBe(true);
@@ -137,7 +139,7 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/newText/);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/existing/i);
-    expect(surfaceText).toMatch(/create, full-note overwrite, delete, trash, restore, copy, rename, move/i);
+    expect(surfaceText).toMatch(/full-note overwrite/i);
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
   });
 
@@ -147,7 +149,7 @@ describe("public tool surface", () => {
     const schema = pi.tools.get("obsidian_manage").parameters;
 
     expect(schema.additionalProperties).toBe(false);
-    expect(Object.keys(schema.properties).sort()).toEqual(["confirmationToken", "dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
+    expect(Object.keys(schema.properties).sort()).toEqual(["dryRun", "fromPath", "operation", "path", "toPath", "trashFolder", "trashPath"]);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md" })).toBe(true);
     expect(Value.Check(schema, { operation: "move_note", fromPath: "Projects/Plan.md", toPath: "Archive/Plan.md", dryRun: false })).toBe(true);
     expect(Value.Check(schema, { operation: "trash_note", path: "Projects/Plan.md" })).toBe(true);
@@ -167,25 +169,46 @@ describe("public tool surface", () => {
     expect(surfaceText).toMatch(/toPath/);
     expect(surfaceText).toMatch(/trashPath/);
     expect(surfaceText).toMatch(/trashFolder/);
-    expect(surfaceText).toMatch(/_Trash/);
-    expect(surfaceText).toMatch(/TRASH_TARGET_EXISTS/);
-    expect(surfaceText).toMatch(/PARENT_MISSING/);
+    expect(surfaceText).toMatch(/approval|human/i);
+    expect(surfaceText).toMatch(/overwrite/i);
     expect(surfaceText).toMatch(/dryRun/i);
     expect(surfaceText).toMatch(/byte/i);
     expect(surfaceText).toMatch(/overwrite/i);
     expect(surfaceText).toMatch(/link/i);
   });
 
+  it("publishes a strict obsidian_destroy schema for explicit destructive operations only", () => {
+    const pi = fakePi();
+    registerObsidianVault(pi as any, { backend: seededFakeCli() });
+    const schema = pi.tools.get("obsidian_destroy").parameters;
+
+    expect(schema.additionalProperties).toBe(false);
+    expect(Object.keys(schema.properties).sort()).toEqual(["content", "dryRun", "operation", "path"]);
+    expect(Value.Check(schema, { operation: "delete_note", path: "Projects/Plan.md" })).toBe(true);
+    expect(Value.Check(schema, { operation: "delete_folder", path: "Archive/Old Project", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "replace_note", path: "Projects/Plan.md", content: "# Replacement", dryRun: false })).toBe(true);
+    expect(Value.Check(schema, { operation: "empty_trash" })).toBe(true);
+    expect(Value.Check(schema, { operation: "delete_note", path: "Projects/Plan.md", recursive: true })).toBe(false);
+    expect(Value.Check(schema, { operation: "replace_note", path: "Projects/Plan.md", content: "# Replacement", confirmationToken: "x" })).toBe(false);
+    const surfaceText = [pi.tools.get("obsidian_destroy").description, pi.tools.get("obsidian_destroy").promptSnippet, ...(pi.tools.get("obsidian_destroy").promptGuidelines ?? [])].join("\n");
+    expect(surfaceText).toMatch(/delete_note/);
+    expect(surfaceText).toMatch(/delete_folder/);
+    expect(surfaceText).toMatch(/replace_note/);
+    expect(surfaceText).toMatch(/empty_trash/);
+    expect(surfaceText).toMatch(/destructive approval|Auto-destroy/i);
+    expect(surfaceText).toMatch(/Auto-write.*never authorizes/i);
+    expect(surfaceText).toMatch(/symlink|special-file/i);
+  });
+
   it("reports obsidian_edit status without leaking vaultRoot or absolute paths", async () => {
     const pi = fakePi();
     const messages: string[] = [];
-    const tempRoot = "/tmp/pi-obsidian-status-vault";
-    registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: tempRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: "/tmp/pi-obsidian-status-missing.json" });
+    const tempRoot = mkdtempSync(path.join(os.tmpdir(), "pi-obsidian-status-vault-"));
+    registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: tempRoot }, configPath: path.join(tempRoot, "missing-config.json") });
     await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string) { messages.push(message); } } });
     const message = messages.join("\n");
-    expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
-    expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
-    requireCapabilities(message);
+    expect(message).toContain("Obsidian Vault: ready");
+    expect(message).toContain("Vault: dev override");
     expect(message).not.toContain(tempRoot);
     expect(message).not.toMatch(/\/tmp\/pi-obsidian-status-vault/);
   });
@@ -212,10 +235,8 @@ describe("public tool surface", () => {
       await pi.commands.get("obsidian-vault").handler("", { ui: { notify(message: string) { messages.push(message); } } });
       const message = messages.join("\n");
 
-      expect(message).toContain("CLI: configured absolute path redacted");
-      expect(message).toMatch(/obsidian_edit: (available|unavailable|degraded)/);
-      expect(message).toMatch(/obsidian_manage: (available|unavailable|degraded)/);
-      requireCapabilities(message);
+      expect(message).toContain("Obsidian Vault: ready");
+      expect(message).toContain("Vault: dev override");
       expect(message).not.toContain(vaultRoot);
       expect(message).not.toContain(absoluteTargetPath);
       expect(message).not.toContain(absoluteCliPath);

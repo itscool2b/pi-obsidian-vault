@@ -4,51 +4,67 @@ import { registerObsidianVault } from "../src/index.js";
 import { seededFakeCli } from "./fake-obsidian-cli.js";
 import { fakePi, runStatusCommand, withTempVault } from "./write-test-utils.js";
 
-describe("status token/config posture", () => {
-  it("reports default token and config posture without leaking local paths", async () => {
+describe("status auto-write and simple config posture", () => {
+  it("reports approval-required simple posture without leaking local paths", async () => {
     await withTempVault(async (vaultRoot) => {
       const pi = fakePi();
-      registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot, OBSIDIAN_CLI_PATH: "obsidian-cli" }, configPath: path.join(vaultRoot, "missing-config.json") });
+      registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
       const status = await runStatusCommand(pi);
-      expect(status.message).toContain("Commit tokens: enabled (default_risky, ttl 300s)");
-      expect(status.message).toContain("retrieveBudget=standard");
-      expect(status.message).toContain("relationshipBudget=standard");
-      expect(status.message).toContain("maxPreviewChars=4000");
-      expect(status.message).toContain("maxValidationIssues=50");
-      expect(status.message).toContain("trashFolder=_Trash");
-      expect(status.message).toContain("Dry-run validation: create=enabled, append=enabled");
+      expect(status.message).toContain("Obsidian Vault: ready");
+      expect(status.message).toContain("Mutations: approval required");
+      expect(status.message).toContain("Destructive mutations: destructive approval required");
+      expect(status.message).toContain("Auto-write this session: disabled");
+      expect(status.message).toContain("Auto-destroy this session: disabled");
+      expect(status.message).toContain("Trash folder: _Trash");
+      expect(status.message).not.toContain("Commit tokens:");
+      expect(status.message).not.toContain("retrieveBudget=");
       expect(status.message).not.toContain(vaultRoot);
     });
   });
 
-  it("reports env-overridden strict token posture and safe config toggles", async () => {
+  it("toggles auto-write and auto-destroy for the current session through the status command", async () => {
+    await withTempVault(async (vaultRoot) => {
+      const pi = fakePi();
+      registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
+      const command = pi.commands.get("obsidian-vault");
+      const messages: string[] = [];
+      const ctx = { ui: { notify(message: string) { messages.push(message); } } };
+
+      await command.handler("auto-write on", ctx);
+      expect(messages.at(-1)).toMatch(/enabled/i);
+      expect((await runStatusCommand(pi)).message).toContain("Auto-write this session: enabled");
+
+      await command.handler("auto-write off", ctx);
+      expect(messages.at(-1)).toMatch(/disabled/i);
+      expect((await runStatusCommand(pi)).message).toContain("Auto-write this session: disabled");
+
+      await command.handler("auto-destroy on", ctx);
+      expect(messages.at(-1)).toMatch(/enabled/i);
+      expect((await runStatusCommand(pi)).message).toContain("Auto-destroy this session: enabled");
+
+      await command.handler("auto-destroy off", ctx);
+      expect(messages.at(-1)).toMatch(/disabled/i);
+      expect((await runStatusCommand(pi)).message).toContain("Auto-destroy this session: disabled");
+    });
+  });
+
+  it("ignores old config env knobs in normal status", async () => {
     await withTempVault(async (vaultRoot) => {
       const pi = fakePi();
       registerObsidianVault(pi as any, {
         backend: seededFakeCli(),
         env: {
           OBSIDIAN_VAULT_PATH: vaultRoot,
-          OBSIDIAN_CLI_PATH: "obsidian-cli",
-          OBSIDIAN_COMMIT_TOKEN_STRICT_MODE: "true",
-          OBSIDIAN_COMMIT_TOKEN_TTL_SECONDS: "120",
           OBSIDIAN_RETRIEVE_DEFAULT_BUDGET: "tiny",
-          OBSIDIAN_RELATIONSHIP_DEFAULT_BUDGET: "expanded",
           OBSIDIAN_MAX_PREVIEW_CHARS: "800",
-          OBSIDIAN_VALIDATE_MAX_ISSUES: "7",
           OBSIDIAN_TRASH_FOLDER: "Archive/Trash",
-          OBSIDIAN_WRITE_DRY_RUN_VALIDATION_ENABLED: "false",
-          OBSIDIAN_APPEND_DRY_RUN_VALIDATION_ENABLED: "false",
         },
         configPath: path.join(vaultRoot, "missing-config.json"),
       });
       const status = await runStatusCommand(pi);
-      expect(status.message).toContain("Commit tokens: enabled (strict_all_mutations, ttl 120s)");
-      expect(status.message).toContain("retrieveBudget=tiny");
-      expect(status.message).toContain("relationshipBudget=expanded");
-      expect(status.message).toContain("maxPreviewChars=800");
-      expect(status.message).toContain("maxValidationIssues=7");
-      expect(status.message).toContain("trashFolder=Archive/Trash");
-      expect(status.message).toContain("Dry-run validation: create=disabled, append=disabled");
+      expect(status.message).toContain("Trash folder: _Trash");
+      expect(status.message).not.toContain("retrieveBudget=tiny");
+      expect(status.message).not.toContain("Archive/Trash");
       expect(status.message).not.toContain(vaultRoot);
     });
   });

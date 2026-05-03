@@ -22,15 +22,15 @@ describe("obsidian_write dry-run previews", () => {
     });
   });
 
-  it("defaults to preview and clips long content previews", async () => {
+  it("defaults to preview and preserves normal-sized content previews", async () => {
     await withTempVault(async (vaultRoot) => {
       const long = "x".repeat(800);
       const result = await obsidianWrite({ operation: "create", path: "Preview/Default.md", content: long }, { vaultRoot });
       expect(result.status).toBe("preview");
       expect(result.dryRun).toBe(true);
       expect(result.preview?.contentChars).toBe(800);
-      expect(result.preview?.previewTruncated).toBe(true);
-      expect(result.preview?.contentPreview?.length ?? 0).toBeLessThan(800);
+      expect(result.preview?.previewTruncated).toBe(false);
+      expect(result.preview?.contentPreview?.length ?? 0).toBe(800);
       expect(result.nextActions.map((action) => action.action)).toContain("confirm_preview");
       await expect(access(absoluteNotePath(vaultRoot, "Preview/Default.md"))).rejects.toThrow();
     });
