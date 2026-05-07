@@ -22,7 +22,7 @@ describe("release hardening temporary-vault smoke", () => {
     };
 
     expect(packageJson.name).toBe("pi-obsidian-vault");
-    expect(packageJson.version).toBe("0.2.0");
+    expect(packageJson.version).toBe("0.2.3");
     expect(Object.hasOwn(packageJson, "private")).toBe(false);
     expect(packageJson.description).toMatch(/Agent-safe Obsidian vault access for Pi/i);
     expect(packageJson.license).toBe("MIT");

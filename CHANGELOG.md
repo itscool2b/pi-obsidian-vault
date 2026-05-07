@@ -2,6 +2,63 @@
 
 All notable changes to `pi-obsidian-vault` will be documented in this file.
 
+## [0.2.3] - 2026-05-07
+
+Patch release for deterministic Obsidian CLI setup guidance.
+
+### Fixed
+
+- Detects disabled/unregistered Obsidian CLI setup failures, including the real `Command line interface is not enabled` message that exits successfully.
+- Returns deterministic setup guidance for CLI-backed retrieval and existing-note validation instead of misleading empty candidate results.
+- Suppresses raw CLI setup noise such as `ENOENT`, spawn errors, stdout/stderr diagnostics, and local paths in user-facing setup responses.
+
+### Changed
+
+- Added focused CLI setup regression tests while preserving existing write/edit/manage/destroy/plan behavior.
+- Added the Obsidian CLI prerequisite near the top of the README and in troubleshooting.
+
+### Safety posture
+
+- CLI setup UX only; no new mutation powers, broad scans, shell/network behavior, overwrite behavior, link rewriting, or destructive semantics.
+
+## [0.2.2] - 2026-05-06
+
+README polish patch for npm/pi.dev.
+
+### Changed
+
+- Reworked the README around the actual public tool surface, auto-detect-first setup, and centralized auto-open behavior.
+- Simplified the package landing page while preserving accurate examples for retrieval, validation, planning, writing, editing, note management, and explicit destructive operations.
+- Clarified vault resolution, session auto-open/auto-write/auto-destroy behavior, and safety limitations without changing extension behavior.
+
+### Safety posture
+
+- Documentation/package polish only; no extension behavior, public tools, mutation operations, app-readiness behavior, or safety semantics changed.
+
+## [0.2.1] - 2026-05-04
+
+Patch release for centralized Obsidian Desktop auto-open readiness and write-hang hardening.
+
+### Added
+
+- Central app-readiness preflight that can auto-open the configured/detected Obsidian vault for vault-touching tools.
+- `/obsidian-vault auto-open status|on|off` session controls.
+- Desktop launch controls through environment overrides such as `OBSIDIAN_AUTO_OPEN`, `OBSIDIAN_APP_PATH`, timeout settings, vault name, and safe vault URI.
+
+### Changed
+
+- Mutation tools now preview/validate first and only check/open Obsidian immediately before an actual commit.
+- Registered-tool no-UI `dryRun:false` non-destructive calls now return previews instead of committing without approval.
+- Centralized registered-tool retrieval/validation launch behavior instead of relying on legacy CLI auto-launch.
+
+### Fixed
+
+- Prevented write hangs from preflight running before dry-run previews or validation failures.
+- Added hard timeout settling for spawned commands and app preflight runner calls.
+- Added approval timeout/abort handling; timeout is treated as cancellation.
+- Removed raw path echoing from app preflight setup failures.
+- Replaced brittle Windows/WSL `cmd.exe /c start` launch path with `explorer.exe`, removed URI-less Linux fallback, and added basic WSL `/mnt/<drive>` path conversion.
+
 ## [0.2.0] - 2026-05-03
 
 Shipping release for the dead-simple vault path model, built-in human approval flow, session auto-write, and the new explicit destructive tool.
@@ -72,6 +129,9 @@ Initial public release for npm/pi.dev.
 - Backlink metadata can degrade safely when the configured retrieval backend cannot provide targeted references.
 - Real-vault checks are opt-in/manual only; committed smoke tests should use temporary or disposable vaults.
 
+[0.2.3]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.2.3
+[0.2.2]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.2.2
+[0.2.1]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.2.1
 [0.2.0]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.2.0
 [0.1.1]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.1.1
 [0.1.0]: https://github.com/itscool2b/pi-obsidian-vault/releases/tag/v0.1.0

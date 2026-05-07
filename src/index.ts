@@ -4,7 +4,8 @@ import path from "node:path";
 import { Type } from "typebox";
 import { editStatusFromConfig, forgetRememberedVaultPath, loadConfig, manageStatusFromConfig, rememberedVaultStatus, setRememberedVaultPath, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig, type VaultStatus } from "./config.js";
 import { budgetForProfile } from "./context-packer.js";
-import { ObsidianCliAdapter } from "./obsidian-cli.js";
+import { DesktopObsidianAppController, type ObsidianAppController, type ObsidianAppReadyResult } from "./obsidian-app.js";
+import { classifyObsidianCliSetupFailure, ObsidianCliAdapter, type ObsidianCliSetupClassification } from "./obsidian-cli.js";
 import { obsidianRetrieve } from "./retrieval-engine.js";
 import { obsidianValidate, setupRequiredValidationResponse } from "./validation-engine.js";
 import { obsidianEdit } from "./edit-engine.js";
@@ -16,12 +17,14 @@ import type { AgentGuidance, BudgetProfile, ObsidianCliBackend, ObsidianRetrieve
 import type { ObsidianEditOutput, ObsidianEditRequest } from "./edit-types.js";
 import type { ObsidianManageOutput, ObsidianManageRequest } from "./manage-types.js";
 import type { ObsidianDestroyOutput, ObsidianDestroyRequest } from "./destroy-types.js";
-import type { ObsidianPlanRequest } from "./plan-types.js";
+import type { ObsidianPlanOutput, ObsidianPlanRequest } from "./plan-types.js";
 import type { ObsidianValidateRequest } from "./validation-types.js";
 import type { ObsidianWriteOutput, ObsidianWriteRequest } from "./write-types.js";
 
 export * from "./retrieval-types.js";
 export { loadConfig } from "./config.js";
+export { DesktopObsidianAppController } from "./obsidian-app.js";
+export type { ObsidianAppController, ObsidianAppReadyResult } from "./obsidian-app.js";
 export { ObsidianCliAdapter } from "./obsidian-cli.js";
 export { obsidianRetrieve } from "./retrieval-engine.js";
 export { obsidianValidate } from "./validation-engine.js";
@@ -40,6 +43,7 @@ export * from "./write-types.js";
 
 export interface RegisterObsidianVaultOptions extends LoadConfigOptions {
   backend?: ObsidianCliBackend | undefined;
+  appController?: ObsidianAppController | undefined;
 }
 
 export const OBSIDIAN_RETRIEVE_BUDGETS = ["tiny", "standard", "expanded"] as const;
@@ -95,7 +99,7 @@ const ObsidianValidateParams = Type.Object({
   budget: Type.Optional(Budget),
 }, {
   additionalProperties: false,
-  description: "obsidian_validate arguments. Supported top-level fields only: target, path, content, expectedPath, maxIssues, budget. target must be existing_note or proposed_content. existing_note reads only one explicit safe vault-relative Markdown path. proposed_content validates explicit Markdown content without vault access. Validation is read-only, bounded, redacted, workflow-neutral, and never mutates, scans broadly, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
+  description: "obsidian_validate arguments. Supported top-level fields only: target, path, content, expectedPath, maxIssues, budget. target must be existing_note or proposed_content. existing_note reads only one explicit safe vault-relative Markdown path and may trigger Obsidian app readiness preflight. proposed_content validates explicit Markdown content without vault access. Validation is read-only, bounded, redacted, workflow-neutral, and never mutates, scans broadly, rewrites links, automates UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
 });
 
 const ObsidianWriteParams = Type.Object({
@@ -192,6 +196,8 @@ const ObsidianDestroyParams = Type.Object({
 
 export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "registerCommand">, options: RegisterObsidianVaultOptions = {}): void {
   const approvalState: MutationApprovalState = { autoWriteForSession: false, autoDestroyForSession: false };
+  const appState: ObsidianAppSessionState = {};
+  const appController = options.appController ?? new DesktopObsidianAppController({ env: options.env, platform: options.platform });
 
   pi.registerTool({
     name: "obsidian_config",
@@ -207,7 +213,15 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
     parameters: ObsidianConfigParams,
     async execute(_toolCallId: string, params: { operation?: string | undefined; vaultPath?: string | undefined }) {
       const operation = params.operation?.trim();
-      if (operation === "set_vault") return toolResponse(await setRememberedVaultPath(params.vaultPath ?? "", options));
+      if (operation === "set_vault") {
+        const result = await setRememberedVaultPath(params.vaultPath ?? "", options);
+        if (result.status === "success") {
+          const config = effectiveAppConfig(await loadConfig(options), appState);
+          const appReady = await ensureObsidianAppForTool("obsidian_config", config, options, appController, true);
+          if (!appReady.ok) return toolResponse({ ...result, warnings: [...result.warnings, ...appReady.warnings, appReady.message], errors: [...result.errors, ...appReady.errors] });
+        }
+        return toolResponse(result);
+      }
       if (operation === "forget_vault") return toolResponse(await forgetRememberedVaultPath(options));
       if (operation === "status" || operation === undefined || operation === "") return toolResponse(await rememberedVaultStatus(options));
       return toolResponse({ status: "invalid", operation, message: "obsidian_config supports operation=set_vault, operation=forget_vault, or operation=status.", warnings: [], errors: ["Unsupported obsidian_config operation."] });
@@ -229,17 +243,23 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "Start with candidate discovery; do not ask for broad note, folder, or vault dumps.",
       "Read agentGuidance.resultState, bestMatch, confidence, contextRecommendation, and nextActions before deciding whether to answer or call context mode.",
       "Use obsidian_retrieve mode=project with scope.folder for bounded project summaries; outputs still remain candidate-first.",
-      "obsidian_retrieve is read-only. It does not open Obsidian and does not write, append, rename, move, trash, copy, restore, rewrite links, or delete notes.",
+      "obsidian_retrieve is read-only. It may auto-open the configured Obsidian vault if the app is closed, but it does not write, append, rename, move, trash, copy, restore, rewrite links, or delete notes.",
     ],
     parameters: ObsidianRetrieveParams,
     async execute(_toolCallId: string, params: RetrievalRequest) {
-      const config = await loadConfig(options);
+      const config = effectiveAppConfig(await loadConfig(options), appState);
       if (!options.backend && config.errors.length > 0) {
         return toolResponse(setupRequiredResponse(params, config, config.errors));
       }
-      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: config.autoLaunch, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
-      const health = await backend.checkHealth({ allowAutoLaunch: config.autoLaunch });
+      const appReady = await ensureObsidianAppForTool("obsidian_retrieve", config, options, appController, true);
+      if (!appReady.ok) {
+        return toolResponse(setupRequiredResponse(params, config, [...config.errors, ...appReady.errors, appReady.message], appReady.warnings));
+      }
+      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: false, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
+      const health = await backend.checkHealth({ allowAutoLaunch: false });
       if (!health.available) {
+        const cliSetup = classifyObsidianCliSetupFailure(health);
+        if (cliSetup) return toolResponse(setupRequiredResponse(params, config, [cliSetup.message], [], { cliSetup }));
         const errors = [...(!options.backend ? config.errors : []), ...health.errors, "Obsidian retrieval is unavailable. Open Obsidian manually, then retry."];
         return toolResponse(setupRequiredResponse(params, config, errors, health.warnings));
       }
@@ -252,7 +272,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_validate",
     label: "Obsidian Validate",
-    description: "Validate one explicit existing Markdown note or one explicit proposed Markdown content payload for objectively broken, risky, ambiguous, or agent-confusing Markdown. Read-only, workflow-neutral, bounded, and redacted. Supports target=existing_note with path, or target=proposed_content with content plus optional expectedPath, budget, and maxIssues. Never mutates, scans folders/vaults, rewrites links, opens UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
+    description: "Validate one explicit existing Markdown note or one explicit proposed Markdown content payload for objectively broken, risky, ambiguous, or agent-confusing Markdown. Read-only, workflow-neutral, bounded, and redacted. Supports target=existing_note with path, or target=proposed_content with content plus optional expectedPath, budget, and maxIssues. Existing-note validation may auto-open the configured Obsidian vault; validation never mutates, scans folders/vaults, rewrites links, automates UI, runs shell/network calls, creates templates, generates paths, or executes arbitrary commands.",
     promptSnippet: "Use obsidian_validate for read-only Markdown validation of one explicit note or explicit proposed content. It is advisory and workflow-neutral.",
     promptGuidelines: [
       "Use obsidian_validate when you need to check objectively broken, risky, ambiguous, or agent-confusing Markdown before suggesting edits or asking to commit content.",
@@ -262,7 +282,7 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "Validation is advisory and workflow-neutral: missing frontmatter, tags, status/date/source fields, templates, PARA, Zettelkasten, daily-note structure, project-note structure, and other methodology choices are not errors.",
       "Suspicious absolute-looking, Windows absolute-looking, UNC-looking, traversal-looking, or .obsidian-looking strings inside Markdown content are warning-severity advisory issues; unsafe request path fields are refused before validation.",
       "Warning and info issues keep valid=true and must not block commits. valid=false is reserved for error-severity validation issues or request/setup failures where no valid content result was produced.",
-      "obsidian_validate never creates, appends, edits, moves, trashes, restores, copies, deletes, creates folders, rewrites links, scans broadly, opens UI, runs shell/network calls, generates paths, uses templates, or executes arbitrary commands.",
+      "obsidian_validate never creates, appends, edits, moves, trashes, restores, copies, deletes, creates folders, rewrites links, scans broadly, automates UI, runs shell/network calls, generates paths, uses templates, or executes arbitrary commands.",
       "Outputs must remain bounded and redacted: never expect full note/proposed content, vault roots, absolute paths, CLI paths, command paths, lock keys, shell details, network details, or arbitrary local filesystem details.",
     ],
     parameters: ObsidianValidateParams,
@@ -274,14 +294,20 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       }
       const preflight = await obsidianValidate(undefined, params, { setupErrors: ["Validation preflight completed without configured note access."] });
       if (preflight.status !== "setup_required") return toolResponse(preflight);
-      const config = await loadConfig(options);
+      const config = effectiveAppConfig(await loadConfig(options), appState);
       if (!options.backend && config.errors.length > 0) {
         const result = await obsidianValidate(undefined, params, { defaultBudget: config.defaultRetrieveBudget as BudgetProfile | undefined, defaultMaxIssues: config.maxValidationIssues, setupErrors: config.errors });
         return toolResponse(result);
       }
-      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: config.autoLaunch, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
-      const health = await backend.checkHealth({ allowAutoLaunch: config.autoLaunch });
+      const appReady = await ensureObsidianAppForTool("obsidian_validate", config, options, appController, true);
+      if (!appReady.ok) {
+        return toolResponse(setupRequiredValidationResponse(params, [...config.errors, ...appReady.errors, appReady.message], appReady.warnings, preflight.path));
+      }
+      const backend = options.backend ?? new ObsidianCliAdapter({ cliPath: config.cliPath, vaultTarget: config.vaultTarget, cwd: config.vaultRoot, timeoutMs: config.cliTimeoutMs, autoLaunch: false, launchWaitMs: config.launchWaitMs, obsidianAppPath: config.obsidianAppPath });
+      const health = await backend.checkHealth({ allowAutoLaunch: false });
       if (!health.available) {
+        const cliSetup = classifyObsidianCliSetupFailure(health);
+        if (cliSetup) return toolResponse(setupRequiredValidationResponse(params, [cliSetup.message], [], preflight.path, { setupMessage: cliSetup.message }));
         const errors = [...(!options.backend ? config.errors : []), ...health.errors, "Obsidian validation is unavailable. Open Obsidian manually, then retry existing-note validation."];
         return toolResponse(setupRequiredValidationResponse(params, errors, health.warnings, preflight.path));
       }
@@ -293,19 +319,23 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
   pi.registerTool({
     name: "obsidian_plan",
     label: "Obsidian Plan Preview",
-    description: "Preview a bounded ordered sequence of supported non-destructive Obsidian operations without executing anything. Read-only. Supports planned retrieve.note, retrieve.relationships, validate existing/proposed content, write create/append/create_folder, edit structured operations, and manage move/trash/restore/copy. Never commits, stages, batches, transactionally applies, writes files, rewrites links, scans broadly, opens UI, runs shell/network calls, creates locks/reservations, or previews obsidian_destroy.",
+    description: "Preview a bounded ordered sequence of supported non-destructive Obsidian operations without executing anything. Read-only. Supports planned retrieve.note, retrieve.relationships, validate existing/proposed content, write create/append/create_folder, edit structured operations, and manage move/trash/restore/copy. Vault-state plans may auto-open the configured Obsidian vault; planning never commits, stages, batches, transactionally applies, writes files, rewrites links, scans broadly, automates UI, runs shell/network calls, creates locks/reservations, or previews obsidian_destroy.",
     promptSnippet: "Use obsidian_plan to preview a sequence of explicit safe operations before asking for individual dry-runs. It never executes or commits.",
     promptGuidelines: [
       "Use obsidian_plan only for bounded preview of explicit non-destructive planned operations. It is read-only and cannot commit, batch-run, stage, or transactionally apply operations.",
       "Each planned operation must mirror a supported non-destructive public capability: retrieve note, retrieve.relationships, validate existing/proposed content, write create/append/create_folder, edit replace_section/insert_under_heading/update_frontmatter/remove_frontmatter/replace_exact_text, or manage move_note/trash_note/restore_note/copy_note. obsidian_destroy is deliberately not planned here; use obsidian_destroy dryRun for destructive previews.",
       "Planned retrieve.relationships entries require one explicit safe vault-relative Markdown path and follow relationship safety rules: no broad backlink scan, no recursive graph expansion, no full note dump, no link rewriting, and degraded signals when data is unavailable.",
       "dryRun:false in a planned operation is ignored and reported as a warning; obsidian_plan never passes dryRun:false to underlying tools.",
-      "Plan preview may perform only targeted checks for explicit safe paths and virtual in-memory effects. It never scans folders or the vault broadly, expands wildcards, infers destinations, rewrites links, shells out, uses network, opens UI, or writes files.",
+      "Plan preview may perform only targeted checks for explicit safe paths and virtual in-memory effects. It never scans folders or the vault broadly, expands wildcards, infers destinations, rewrites links, shells out, uses network, automates UI, or writes files.",
       "If valid=true, ask for individual existing-tool dry-runs before any commit. If valid=false, revise the plan; obsidian_plan cannot execute it.",
     ],
     parameters: ObsidianPlanParams,
     async execute(_toolCallId: string, params: ObsidianPlanRequest) {
-      const config = await loadConfig(options);
+      const config = effectiveAppConfig(await loadConfig(options), appState);
+      if (planRequiresVaultPreflight(params)) {
+        const appReady = await ensureObsidianAppForTool("obsidian_plan", config, options, appController, true);
+        if (!appReady.ok) return toolResponse(setupRequiredPlanResponse(params, appReady));
+      }
       const result = await obsidianPlan(params, { vaultRoot: config.vaultRoot });
       return toolResponse(result);
     },
@@ -323,9 +353,9 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "obsidian_write keeps hard rails: no overwrite, delete, trash, restore, copy, rename, move, shell/network, broad scan, or arbitrary commands.",
     ],
     parameters: ObsidianWriteParams,
-    async execute(_toolCallId: string, params: ObsidianWriteRequest, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
-      const config = await loadConfig(options);
-      const result = await runWriteWithHumanApproval(params, config, ctx, approvalState);
+    async execute(_toolCallId: string, params: ObsidianWriteRequest, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
+      const config = effectiveAppConfig(await loadConfig(options), appState);
+      const result = await runWriteWithHumanApproval(params, config, ctx, approvalState, () => ensureObsidianAppForTool("obsidian_write", config, options, appController, true), signal);
       return toolResponse(result);
     },
   });
@@ -342,9 +372,9 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "obsidian_edit keeps hard rails: no create, full-note overwrite, delete, trash, restore, copy, rename/move, shell/network, regex/fuzzy edits, broad scan, or arbitrary commands."
     ],
     parameters: ObsidianEditParams,
-    async execute(_toolCallId: string, params: ObsidianEditRequest, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
-      const config = await loadConfig(options);
-      const result = await runEditWithHumanApproval(params, config, ctx, approvalState);
+    async execute(_toolCallId: string, params: ObsidianEditRequest, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
+      const config = effectiveAppConfig(await loadConfig(options), appState);
+      const result = await runEditWithHumanApproval(params, config, ctx, approvalState, () => ensureObsidianAppForTool("obsidian_edit", config, options, appController, true), signal);
       return toolResponse(result);
     },
   });
@@ -361,9 +391,9 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "obsidian_manage keeps hard rails: no permanent delete, folders, bulk/wildcard/recursive actions, overwrites, link rewrites, shell/network, broad scan, or arbitrary commands.",
     ],
     parameters: ObsidianManageParams,
-    async execute(_toolCallId: string, params: ObsidianManageRequest, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
-      const config = await loadConfig(options);
-      const result = await runManageWithHumanApproval(params, config, ctx, approvalState);
+    async execute(_toolCallId: string, params: ObsidianManageRequest, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
+      const config = effectiveAppConfig(await loadConfig(options), appState);
+      const result = await runManageWithHumanApproval(params, config, ctx, approvalState, () => ensureObsidianAppForTool("obsidian_manage", config, options, appController, true), signal);
       return toolResponse(result);
     },
   });
@@ -381,38 +411,63 @@ export function registerObsidianVault(pi: Pick<ExtensionAPI, "registerTool" | "r
       "Auto-write this session never authorizes obsidian_destroy; destructive operations have separate Auto-destroy this session state.",
     ],
     parameters: ObsidianDestroyParams,
-    async execute(_toolCallId: string, params: ObsidianDestroyRequest, _signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
-      const config = await loadConfig(options);
-      const result = await runDestroyWithHumanApproval(params, config, ctx, approvalState);
+    async execute(_toolCallId: string, params: ObsidianDestroyRequest, signal?: AbortSignal, _onUpdate?: unknown, ctx?: ToolExecutionContext) {
+      const config = effectiveAppConfig(await loadConfig(options), appState);
+      const result = await runDestroyWithHumanApproval(params, config, ctx, approvalState, () => ensureObsidianAppForTool("obsidian_destroy", config, options, appController, true), signal);
       return toolResponse(result);
     },
   });
 
+  const vaultCommandHandler = async (args: string, ctx: VaultCommandContext) => {
+    if (await handleVaultPathCommand(args, options, ctx)) return;
+    if (await handleAutoOpenCommand(args, appState, options, ctx)) return;
+    const handled = handleAutoWriteCommand(args, approvalState, ctx) || handleAutoDestroyCommand(args, approvalState, ctx);
+    if (handled) return;
+    const normalizedArgs = normalizeCommandArgs(args);
+    if (normalizedArgs === "help" || normalizedArgs === "-h" || normalizedArgs === "--help") {
+      notifyVaultCommandUsage(ctx, "info");
+      return;
+    }
+    if (normalizedArgs !== "" && normalizedArgs !== "status") {
+      notifyUnknownVaultCommand(ctx);
+      return;
+    }
+    const config = effectiveAppConfig(await loadConfig(options), appState);
+    const status = statusFromConfig(config);
+    const writeStatus = await writeStatusFromConfig(config);
+    const editStatus = await editStatusFromConfig(config);
+    const manageStatus = await manageStatusFromConfig(config);
+    const ready = Boolean(status.vaultRoot) && writeStatus.writable && editStatus.status !== "unavailable" && manageStatus.status !== "unavailable";
+    const lines = [
+      `Obsidian Vault: ${ready ? "ready" : "setup needed"}`,
+      `Vault: ${vaultSourceLabel(status.source)}`,
+      `Mutations: ${approvalState.autoWriteForSession ? "auto-write this session" : "approval required"}`,
+      `Destructive mutations: ${approvalState.autoDestroyForSession ? "auto-destroy this session" : "destructive approval required"}`,
+      `Auto-open Obsidian: ${config.autoOpenObsidian ? "enabled" : "disabled"}`,
+      `Auto-write this session: ${approvalState.autoWriteForSession ? "enabled" : "disabled"}`,
+      `Auto-destroy this session: ${approvalState.autoDestroyForSession ? "enabled" : "disabled"}`,
+      `Trash folder: ${config.defaultTrashFolder}`,
+    ];
+    if (!status.vaultRoot) lines.push("Tell me your Obsidian vault folder path and I can remember it.", "Or run: /obsidian-vault set-vault <path>");
+    for (const warning of config.warnings) lines.push(`Warning: ${redactStatusPath(warning, config, [options.configPath].filter((value): value is string => Boolean(value)))}`);
+    for (const error of [...status.errors, ...writeStatus.errors, ...editStatus.errors, ...manageStatus.errors]) lines.push(`Error: ${redactStatusPath(error, config, [options.configPath].filter((value): value is string => Boolean(value)))}`);
+    ctx.ui.notify(lines.join("\n"), ready ? "info" : "warning");
+  };
+
   pi.registerCommand("obsidian-vault", {
-    description: "Show simple Obsidian vault status. Args: set-vault <path>, forget-vault, auto-write on|off|status, auto-destroy on|off|status",
-    handler: async (args: string, ctx: { ui: { notify(message: string, level?: string): void } }) => {
-      if (await handleVaultPathCommand(args, options, ctx)) return;
-      const handled = handleAutoWriteCommand(args, approvalState, ctx) || handleAutoDestroyCommand(args, approvalState, ctx);
-      if (handled) return;
-      const config = await loadConfig(options);
-      const status = statusFromConfig(config);
-      const writeStatus = await writeStatusFromConfig(config);
-      const editStatus = await editStatusFromConfig(config);
-      const manageStatus = await manageStatusFromConfig(config);
-      const ready = Boolean(status.vaultRoot) && writeStatus.writable && editStatus.status !== "unavailable" && manageStatus.status !== "unavailable";
-      const lines = [
-        `Obsidian Vault: ${ready ? "ready" : "setup needed"}`,
-        `Vault: ${vaultSourceLabel(status.source)}`,
-        `Mutations: ${approvalState.autoWriteForSession ? "auto-write this session" : "approval required"}`,
-        `Destructive mutations: ${approvalState.autoDestroyForSession ? "auto-destroy this session" : "destructive approval required"}`,
-        `Auto-write this session: ${approvalState.autoWriteForSession ? "enabled" : "disabled"}`,
-        `Auto-destroy this session: ${approvalState.autoDestroyForSession ? "enabled" : "disabled"}`,
-        `Trash folder: ${config.defaultTrashFolder}`,
-      ];
-      if (!status.vaultRoot) lines.push("Tell me your Obsidian vault folder path and I can remember it.", "Or run: /obsidian-vault set-vault <path>");
-      for (const warning of config.warnings) lines.push(`Warning: ${redactStatusPath(warning, config, [options.configPath].filter((value): value is string => Boolean(value)))}`);
-      for (const error of [...status.errors, ...writeStatus.errors, ...editStatus.errors, ...manageStatus.errors]) lines.push(`Error: ${redactStatusPath(error, config, [options.configPath].filter((value): value is string => Boolean(value)))}`);
-      ctx.ui.notify(lines.join("\n"), ready ? "info" : "warning");
+    description: "Show simple Obsidian vault status. Args: status, set-vault <path>, forget-vault, auto-open on|off|status, auto-write on|off|status, auto-destroy on|off|status",
+    handler: vaultCommandHandler,
+  });
+
+  pi.registerCommand("obsidian", {
+    description: "Alias for /obsidian-vault. Args: [vault] [status|set-vault <path>|forget-vault|auto-open on|off|status|auto-write on|off|status|auto-destroy on|off|status]",
+    handler: async (args: string, ctx: VaultCommandContext) => {
+      const forwardedArgs = obsidianAliasArgs(args);
+      if (forwardedArgs === undefined) {
+        notifyUnknownObsidianAliasCommand(ctx);
+        return;
+      }
+      await vaultCommandHandler(forwardedArgs, ctx);
     },
   });
 }
@@ -422,12 +477,23 @@ interface MutationApprovalState {
   autoDestroyForSession: boolean;
 }
 
-async function handleVaultPathCommand(args: string, options: RegisterObsidianVaultOptions, ctx: { ui: { notify(message: string, level?: string): void } }): Promise<boolean> {
+interface ObsidianAppSessionState {
+  autoOpenObsidian?: boolean | undefined;
+}
+
+type VaultCommandContext = { ui: { notify(message: string, level?: string): void } };
+
+async function handleVaultPathCommand(args: string, options: RegisterObsidianVaultOptions, ctx: VaultCommandContext): Promise<boolean> {
   const trimmed = args.trim();
-  const normalized = trimmed.toLowerCase().replace(/\s+/g, " ");
+  const normalized = normalizeCommandArgs(args);
   if (normalized === "forget-vault" || normalized === "forget vault") {
     const result = await forgetRememberedVaultPath(options);
     ctx.ui.notify(result.message, result.status === "success" ? "info" : "warning");
+    return true;
+  }
+  if (normalized === "set-vault" || normalized === "set vault") {
+    const result = await setRememberedVaultPath("", options);
+    ctx.ui.notify(`${result.message}\nUsage: /obsidian-vault set-vault <path>`, "warning");
     return true;
   }
   const setMatch = /^(?:set-vault|set vault)\s+(.+)$/i.exec(trimmed);
@@ -452,8 +518,73 @@ function vaultSourceLabel(source: VaultStatus["source"]): string {
   return "missing";
 }
 
-function handleAutoWriteCommand(args: string, state: MutationApprovalState, ctx: { ui: { notify(message: string, level?: string): void } }): boolean {
-  const normalized = args.trim().toLowerCase().replace(/\s+/g, " ");
+function normalizeCommandArgs(args: string): string {
+  return args.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function obsidianAliasArgs(args: string): string | undefined {
+  const trimmed = args.trim();
+  const normalized = normalizeCommandArgs(args);
+  if (normalized === "") return "";
+  if (normalized === "vault") return "";
+  if (normalized.startsWith("vault ")) return trimmed.replace(/^vault\s+/i, "");
+  return isVaultCommandPrefix(normalized) ? trimmed : undefined;
+}
+
+function isVaultCommandPrefix(normalized: string): boolean {
+  const first = normalized.split(" ")[0] ?? "";
+  return ["status", "help", "-h", "--help", "set-vault", "set", "forget-vault", "forget", "auto-open", "autoopen", "auto-write", "autowrite", "auto-destroy", "autodestroy"].includes(first);
+}
+
+function notifyUnknownVaultCommand(ctx: VaultCommandContext): void {
+  ctx.ui.notify([
+    "Unknown /obsidian-vault command.",
+    "Use /obsidian-vault or /obsidian-vault status to show status.",
+    "Other commands: set-vault <path>, forget-vault, auto-open on|off|status, auto-write on|off|status, auto-destroy on|off|status.",
+  ].join("\n"), "warning");
+}
+
+function notifyVaultCommandUsage(ctx: VaultCommandContext, level: string = "info"): void {
+  ctx.ui.notify([
+    "Usage: /obsidian-vault [status]",
+    "/obsidian-vault set-vault <path>",
+    "/obsidian-vault forget-vault",
+    "/obsidian-vault auto-open on|off|status",
+    "/obsidian-vault auto-write on|off|status",
+    "/obsidian-vault auto-destroy on|off|status",
+  ].join("\n"), level);
+}
+
+function notifyUnknownObsidianAliasCommand(ctx: VaultCommandContext): void {
+  ctx.ui.notify([
+    "Unknown /obsidian command.",
+    "Use /obsidian vault or /obsidian-vault to show vault status.",
+    "Other commands: /obsidian vault set-vault <path>, /obsidian vault forget-vault, /obsidian vault auto-open on|off|status, /obsidian vault auto-write on|off|status, /obsidian vault auto-destroy on|off|status.",
+  ].join("\n"), "warning");
+}
+
+async function handleAutoOpenCommand(args: string, state: ObsidianAppSessionState, options: RegisterObsidianVaultOptions, ctx: VaultCommandContext): Promise<boolean> {
+  const normalized = normalizeCommandArgs(args);
+  if (normalized === "auto-open on" || normalized === "autoopen on") {
+    state.autoOpenObsidian = true;
+    ctx.ui.notify("Auto-open Obsidian: enabled\nFuture vault-touching Obsidian tool calls will check whether Obsidian is running and auto-open it when possible.", "info");
+    return true;
+  }
+  if (normalized === "auto-open off" || normalized === "autoopen off") {
+    state.autoOpenObsidian = false;
+    ctx.ui.notify("Auto-open Obsidian: disabled\nFuture vault-touching Obsidian tool calls will ask for Obsidian to be opened manually if it is not running.", "warning");
+    return true;
+  }
+  if (normalized === "auto-open status" || normalized === "autoopen status") {
+    const config = effectiveAppConfig(await loadConfig(options), state);
+    ctx.ui.notify(`Auto-open Obsidian: ${config.autoOpenObsidian ? "enabled" : "disabled"}${state.autoOpenObsidian === undefined ? " (config default)" : " (session override)"}`, config.autoOpenObsidian ? "info" : "warning");
+    return true;
+  }
+  return false;
+}
+
+function handleAutoWriteCommand(args: string, state: MutationApprovalState, ctx: VaultCommandContext): boolean {
+  const normalized = normalizeCommandArgs(args);
   if (normalized === "") return false;
   if (normalized === "auto-write on" || normalized === "autowrite on") {
     state.autoWriteForSession = true;
@@ -472,8 +603,8 @@ function handleAutoWriteCommand(args: string, state: MutationApprovalState, ctx:
   return false;
 }
 
-function handleAutoDestroyCommand(args: string, state: MutationApprovalState, ctx: { ui: { notify(message: string, level?: string): void } }): boolean {
-  const normalized = args.trim().toLowerCase().replace(/\s+/g, " ");
+function handleAutoDestroyCommand(args: string, state: MutationApprovalState, ctx: VaultCommandContext): boolean {
+  const normalized = normalizeCommandArgs(args);
   if (normalized === "auto-destroy on" || normalized === "autodestroy on") {
     state.autoDestroyForSession = true;
     ctx.ui.notify("Auto-destroy this session: enabled\nFuture obsidian_destroy calls will still run internal previews/safety checks, then commit without prompting until this Pi session resets or you run /obsidian-vault auto-destroy off.", "warning");
@@ -506,86 +637,233 @@ const APPROVAL_NO = "No";
 const APPROVAL_AUTO_SESSION = "Auto-write this session";
 const DESTROY_APPROVAL_YES = "Yes, destroy";
 const DESTROY_APPROVAL_AUTO_SESSION = "Auto-destroy this session";
+const APPROVAL_TIMEOUT_MS = 5 * 60_000;
+const APP_PREFLIGHT_TIMEOUT_BUFFER_MS = 1_000;
 
-async function runWriteWithHumanApproval(params: ObsidianWriteRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState): Promise<ObsidianWriteOutput> {
+type AppReadyCheck = () => Promise<ObsidianAppReadyResult>;
+
+function effectiveAppConfig(config: VaultConfig, state: ObsidianAppSessionState): VaultConfig {
+  return state.autoOpenObsidian === undefined ? config : { ...config, autoOpenObsidian: state.autoOpenObsidian };
+}
+
+async function ensureObsidianAppForTool(toolName: string, config: VaultConfig, options: RegisterObsidianVaultOptions, appController: ObsidianAppController, requiresVault: boolean): Promise<ObsidianAppReadyResult> {
+  if (options.backend && !options.appController) {
+    return { ok: true, status: "skipped", alreadyOpen: false, launched: false, retryable: false, message: "Obsidian app preflight skipped for injected test backend.", warnings: [], errors: [] };
+  }
+  const timeoutMs = Math.max(1_000, config.openTimeoutMs + config.launchCommandTimeoutMs + APP_PREFLIGHT_TIMEOUT_BUFFER_MS);
+  return promiseWithTimeout(
+    appController.ensureOpen({ config, toolName, requiresVault, env: options.env, platform: options.platform }),
+    timeoutMs,
+    () => ({ ok: false, status: "timeout", alreadyOpen: false, launched: false, retryable: true, message: "Obsidian app preflight timed out before it could complete.", warnings: [], errors: ["Open Obsidian manually, lower auto-open risk, or retry after the app finishes starting."] } as ObsidianAppReadyResult),
+  ).catch(() => ({ ok: false, status: "launch_failed", alreadyOpen: false, launched: false, retryable: true, message: "Obsidian app preflight failed before it could complete.", warnings: [], errors: ["Open Obsidian manually, then retry."] } as ObsidianAppReadyResult));
+}
+
+async function runWriteWithHumanApproval(params: ObsidianWriteRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState, ensureReady: AppReadyCheck, signal?: AbortSignal): Promise<ObsidianWriteOutput> {
   const options = { vaultRoot: config.vaultRoot, maxPreviewChars: config.maxPreviewChars, writeDryRunValidationEnabled: config.writeDryRunValidationEnabled, appendDryRunValidationEnabled: config.appendDryRunValidationEnabled };
   if (params.dryRun === true) return obsidianWrite({ ...params, dryRun: true }, options);
-  if (params.dryRun === undefined && !state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianWrite({ ...params, dryRun: true }, options);
+  if (!state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianWrite({ ...params, dryRun: true }, options);
   const preview = await obsidianWrite({ ...params, dryRun: true }, options);
   if (preview.status !== "preview") return preview;
-  if (state.autoWriteForSession) return annotateAutoWriteCommit(await obsidianWrite({ ...params, dryRun: false }, options));
-  const decision = await requestMutationApproval(ctx, "Apply Obsidian write?", formatWriteConfirmation(preview));
+  if (state.autoWriteForSession) {
+    const commitReady = await ensureReady();
+    if (!commitReady.ok) return appSetupWriteOutput(params, commitReady);
+    return annotateAutoWriteCommit(await obsidianWrite({ ...params, dryRun: false }, options));
+  }
+  const decision = await requestMutationApproval(ctx, "Apply Obsidian write?", formatWriteConfirmation(preview), signal);
   if (decision === "no") return cancelledOutput(preview);
+  const commitReady = await ensureReady();
+  if (!commitReady.ok) return appSetupWriteOutput(params, commitReady);
   if (decision === "auto_session") state.autoWriteForSession = true;
   const committed = await obsidianWrite({ ...params, dryRun: false }, options);
   return decision === "auto_session" ? annotateAutoWriteEnabled(committed) : committed;
 }
 
-async function runEditWithHumanApproval(params: ObsidianEditRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState): Promise<ObsidianEditOutput> {
+async function runEditWithHumanApproval(params: ObsidianEditRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState, ensureReady: AppReadyCheck, signal?: AbortSignal): Promise<ObsidianEditOutput> {
   const options = { vaultRoot: config.vaultRoot, maxPreviewChars: config.maxPreviewChars };
   if (params.dryRun === true) return obsidianEdit({ ...params, dryRun: true }, options);
-  if (params.dryRun === undefined && !state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianEdit({ ...params, dryRun: true }, options);
+  if (!state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianEdit({ ...params, dryRun: true }, options);
   const preview = await obsidianEdit({ ...params, dryRun: true }, options);
   if (preview.status !== "preview") return preview;
-  if (state.autoWriteForSession) return annotateAutoWriteCommit(await obsidianEdit({ ...params, dryRun: false }, options));
-  const decision = await requestMutationApproval(ctx, "Apply Obsidian edit?", formatEditConfirmation(preview));
+  if (state.autoWriteForSession) {
+    const commitReady = await ensureReady();
+    if (!commitReady.ok) return appSetupEditOutput(params, commitReady);
+    return annotateAutoWriteCommit(await obsidianEdit({ ...params, dryRun: false }, options));
+  }
+  const decision = await requestMutationApproval(ctx, "Apply Obsidian edit?", formatEditConfirmation(preview), signal);
   if (decision === "no") return cancelledOutput(preview);
+  const commitReady = await ensureReady();
+  if (!commitReady.ok) return appSetupEditOutput(params, commitReady);
   if (decision === "auto_session") state.autoWriteForSession = true;
   const committed = await obsidianEdit({ ...params, dryRun: false }, options);
   return decision === "auto_session" ? annotateAutoWriteEnabled(committed) : committed;
 }
 
-async function runManageWithHumanApproval(params: ObsidianManageRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState): Promise<ObsidianManageOutput> {
+async function runManageWithHumanApproval(params: ObsidianManageRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState, ensureReady: AppReadyCheck, signal?: AbortSignal): Promise<ObsidianManageOutput> {
   const options = { vaultRoot: config.vaultRoot, defaultTrashFolder: config.defaultTrashFolder };
   if (params.dryRun === true) return obsidianManage({ ...params, dryRun: true }, options);
-  if (params.dryRun === undefined && !state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianManage({ ...params, dryRun: true }, options);
+  if (!state.autoWriteForSession && !hasHumanApprovalUi(ctx)) return obsidianManage({ ...params, dryRun: true }, options);
   const preview = await obsidianManage({ ...params, dryRun: true }, options);
   if (preview.status !== "preview") return preview;
-  if (state.autoWriteForSession) return annotateAutoWriteCommit(await obsidianManage({ ...params, dryRun: false }, options));
-  const decision = await requestMutationApproval(ctx, "Apply Obsidian note management change?", formatManageConfirmation(preview));
+  if (state.autoWriteForSession) {
+    const commitReady = await ensureReady();
+    if (!commitReady.ok) return appSetupManageOutput(params, commitReady);
+    return annotateAutoWriteCommit(await obsidianManage({ ...params, dryRun: false }, options));
+  }
+  const decision = await requestMutationApproval(ctx, "Apply Obsidian note management change?", formatManageConfirmation(preview), signal);
   if (decision === "no") return cancelledOutput(preview);
+  const commitReady = await ensureReady();
+  if (!commitReady.ok) return appSetupManageOutput(params, commitReady);
   if (decision === "auto_session") state.autoWriteForSession = true;
   const committed = await obsidianManage({ ...params, dryRun: false }, options);
   return decision === "auto_session" ? annotateAutoWriteEnabled(committed) : committed;
 }
 
-async function runDestroyWithHumanApproval(params: ObsidianDestroyRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState): Promise<ObsidianDestroyOutput> {
+async function runDestroyWithHumanApproval(params: ObsidianDestroyRequest, config: VaultConfig, ctx: ToolExecutionContext | undefined, state: MutationApprovalState, ensureReady: AppReadyCheck, signal?: AbortSignal): Promise<ObsidianDestroyOutput> {
   const options = { vaultRoot: config.vaultRoot, maxPreviewChars: config.maxPreviewChars, defaultTrashFolder: config.defaultTrashFolder };
   if (params.dryRun === true) return obsidianDestroy({ ...params, dryRun: true }, options);
   if (!state.autoDestroyForSession && !hasHumanApprovalUi(ctx)) return obsidianDestroy({ ...params, dryRun: true }, options);
   const preview = await obsidianDestroy({ ...params, dryRun: true }, options);
   if (preview.status !== "preview") return preview;
-  if (state.autoDestroyForSession) return annotateAutoDestroyCommit(await obsidianDestroy({ ...params, dryRun: false }, options));
-  const decision = await requestDestructionApproval(ctx, "Permanently apply Obsidian destruction?", formatDestroyConfirmation(preview));
+  if (state.autoDestroyForSession) {
+    const commitReady = await ensureReady();
+    if (!commitReady.ok) return appSetupDestroyOutput(params, commitReady);
+    return annotateAutoDestroyCommit(await obsidianDestroy({ ...params, dryRun: false }, options));
+  }
+  const decision = await requestDestructionApproval(ctx, "Permanently apply Obsidian destruction?", formatDestroyConfirmation(preview), signal);
   if (decision === "no") return cancelledDestroyOutput(preview);
+  const commitReady = await ensureReady();
+  if (!commitReady.ok) return appSetupDestroyOutput(params, commitReady);
   if (decision === "auto_session") state.autoDestroyForSession = true;
   const committed = await obsidianDestroy({ ...params, dryRun: false }, options);
   return decision === "auto_session" ? annotateAutoDestroyEnabled(committed) : committed;
+}
+
+function appSetupWriteOutput(params: ObsidianWriteRequest, ready: ObsidianAppReadyResult): ObsidianWriteOutput {
+  return compactObject({
+    tool: "obsidian_write" as const,
+    status: "setup_required" as const,
+    operation: params.operation?.trim() || undefined,
+    dryRun: params.dryRun ?? true,
+    committed: false,
+    message: ready.message,
+    error: { code: "VAULT_PATH_REQUIRED" as const, category: "setup" as const, message: "Obsidian must be open before obsidian_write can safely run.", recoverable: true },
+    warnings: appReadyWarnings(ready),
+    nextActions: [{ priority: 1, action: "configure_vault_path" as const, label: "Open Obsidian or enable auto-open before retrying." }],
+  });
+}
+
+function appSetupEditOutput(params: ObsidianEditRequest, ready: ObsidianAppReadyResult): ObsidianEditOutput {
+  return compactObject({
+    tool: "obsidian_edit" as const,
+    status: "setup_required" as const,
+    operation: params.operation?.trim() || undefined,
+    dryRun: params.dryRun ?? true,
+    committed: false,
+    message: ready.message,
+    error: { code: "VAULT_PATH_REQUIRED" as const, category: "setup" as const, message: "Obsidian must be open before obsidian_edit can safely run.", recoverable: true },
+    warnings: appReadyWarnings(ready),
+    nextActions: [{ priority: 1, action: "configure_vault_path" as const, label: "Open Obsidian or enable auto-open before retrying." }],
+  });
+}
+
+function appSetupManageOutput(params: ObsidianManageRequest, ready: ObsidianAppReadyResult): ObsidianManageOutput {
+  return compactObject({
+    tool: "obsidian_manage" as const,
+    status: "setup_required" as const,
+    operation: params.operation?.trim() || undefined,
+    dryRun: params.dryRun ?? true,
+    committed: false,
+    message: ready.message,
+    error: { code: "VAULT_PATH_REQUIRED" as const, category: "setup" as const, message: "Obsidian must be open before obsidian_manage can safely run.", recoverable: true },
+    warnings: appReadyWarnings(ready),
+    nextActions: [{ priority: 1, action: "configure_vault_path" as const, label: "Open Obsidian or enable auto-open before retrying." }],
+  });
+}
+
+function appSetupDestroyOutput(params: ObsidianDestroyRequest, ready: ObsidianAppReadyResult): ObsidianDestroyOutput {
+  return compactObject({
+    tool: "obsidian_destroy" as const,
+    status: "setup_required" as const,
+    operation: params.operation?.trim() || undefined,
+    dryRun: params.dryRun ?? true,
+    committed: false,
+    message: ready.message,
+    error: { code: "VAULT_PATH_REQUIRED" as const, category: "setup" as const, message: "Obsidian must be open before obsidian_destroy can safely run.", recoverable: true },
+    warnings: appReadyWarnings(ready),
+    nextActions: [{ priority: 1, action: "configure_vault_path" as const, label: "Open Obsidian or enable auto-open before retrying." }],
+  });
+}
+
+function appReadyWarnings(ready: ObsidianAppReadyResult): string[] {
+  return [...ready.errors, ...ready.warnings, ready.message].filter(Boolean);
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
+}
+
+function promiseWithTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => T): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(onTimeout());
+    }, timeoutMs);
+    promise.then((value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    }, (error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reject(error);
+    });
+  });
+}
+
+function approvalTimeout<T extends MutationApprovalDecision | DestructionApprovalDecision>(fallback: T): () => T {
+  return () => fallback;
+}
+
+function abortPromise<T>(signal: AbortSignal | undefined, fallback: T): Promise<T> | undefined {
+  if (!signal) return undefined;
+  if (signal.aborted) return Promise.resolve(fallback);
+  return new Promise((resolve) => signal.addEventListener("abort", () => resolve(fallback), { once: true }));
+}
+
+async function approvalResultWithTimeout<T>(value: T | Promise<T>, fallback: T, signal: AbortSignal | undefined): Promise<T> {
+  const timed = promiseWithTimeout(Promise.resolve(value), APPROVAL_TIMEOUT_MS, () => fallback).catch(() => fallback);
+  const aborted = abortPromise(signal, fallback);
+  return aborted ? Promise.race([timed, aborted]) : timed;
 }
 
 function hasHumanApprovalUi(ctx: ToolExecutionContext | undefined): boolean {
   return typeof ctx?.ui?.select === "function" || typeof ctx?.ui?.confirm === "function";
 }
 
-async function requestMutationApproval(ctx: ToolExecutionContext | undefined, title: string, message: string): Promise<MutationApprovalDecision> {
+async function requestMutationApproval(ctx: ToolExecutionContext | undefined, title: string, message: string, signal?: AbortSignal): Promise<MutationApprovalDecision> {
   if (typeof ctx?.ui?.select === "function") {
-    const choice = await ctx.ui.select(`${title}\n\n${message}`, [APPROVAL_YES, APPROVAL_NO, APPROVAL_AUTO_SESSION]);
+    const choice = await approvalResultWithTimeout(ctx.ui.select(`${title}\n\n${message}`, [APPROVAL_YES, APPROVAL_NO, APPROVAL_AUTO_SESSION]), APPROVAL_NO, signal);
     if (choice === APPROVAL_YES) return "yes";
     if (choice === APPROVAL_AUTO_SESSION) return "auto_session";
     return "no";
   }
-  if (typeof ctx?.ui?.confirm === "function") return Boolean(await ctx.ui.confirm(title, message)) ? "yes" : "no";
+  if (typeof ctx?.ui?.confirm === "function") return Boolean(await approvalResultWithTimeout(ctx.ui.confirm(title, message, { timeout: APPROVAL_TIMEOUT_MS }), false, signal)) ? "yes" : "no";
   return "yes";
 }
 
-async function requestDestructionApproval(ctx: ToolExecutionContext | undefined, title: string, message: string): Promise<DestructionApprovalDecision> {
+async function requestDestructionApproval(ctx: ToolExecutionContext | undefined, title: string, message: string, signal?: AbortSignal): Promise<DestructionApprovalDecision> {
   if (typeof ctx?.ui?.select === "function") {
-    const choice = await ctx.ui.select(`${title}\n\n${message}`, [DESTROY_APPROVAL_YES, APPROVAL_NO, DESTROY_APPROVAL_AUTO_SESSION]);
+    const choice = await approvalResultWithTimeout(ctx.ui.select(`${title}\n\n${message}`, [DESTROY_APPROVAL_YES, APPROVAL_NO, DESTROY_APPROVAL_AUTO_SESSION]), APPROVAL_NO, signal);
     if (choice === DESTROY_APPROVAL_YES) return "yes";
     if (choice === DESTROY_APPROVAL_AUTO_SESSION) return "auto_session";
     return "no";
   }
-  if (typeof ctx?.ui?.confirm === "function") return Boolean(await ctx.ui.confirm(title, message)) ? "yes" : "no";
+  if (typeof ctx?.ui?.confirm === "function") return Boolean(await approvalResultWithTimeout(ctx.ui.confirm(title, message, { timeout: APPROVAL_TIMEOUT_MS }), false, signal)) ? "yes" : "no";
   return "yes";
 }
 
@@ -683,6 +961,15 @@ function fence(value: string, language = "markdown"): string {
   return `\`\`\`${language}\n${value}\n\`\`\``;
 }
 
+function boundedSetupDiagnostics(messages: string[], config: VaultConfig | undefined): string[] {
+  const redacted = messages
+    .map((message) => redactStatusPath(message, config))
+    .map((message) => message.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .map((message) => message.length > 500 ? `${message.slice(0, 497)}...` : message);
+  return [...new Set(redacted)].slice(0, 8);
+}
+
 function redactStatusPath(message: string, config: VaultConfig | undefined, extraSensitiveValues: string[] = []): string {
   let result = message;
   const exactRedactions = [
@@ -705,21 +992,67 @@ function isAbsoluteFilesystemPath(value: string): boolean {
   return path.isAbsolute(value) || path.win32.isAbsolute(value);
 }
 
-function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | undefined, errors: string[], extraWarnings: string[] = []): ObsidianRetrieveOutput {
+function planRequiresVaultPreflight(params: ObsidianPlanRequest): boolean {
+  if (!Array.isArray(params.operations)) return false;
+  for (const op of params.operations) {
+    if (!op || typeof op !== "object" || Array.isArray(op)) continue;
+    const record = op as Record<string, unknown>;
+    const tool = planToolName(record.tool) ?? planToolName(record.category);
+    const operation = typeof record.operation === "string" ? record.operation.trim().toLowerCase() : "";
+    if (tool === "validate" && operation === "proposed_content") continue;
+    if (tool === "retrieve" && ["note", "relationships"].includes(operation)) return true;
+    if (tool === "validate" && operation === "existing_note") return true;
+    if (tool === "write" && ["create", "append", "create_folder"].includes(operation)) return true;
+    if (tool === "edit" && ["replace_section", "insert_under_heading", "update_frontmatter", "remove_frontmatter", "replace_exact_text"].includes(operation)) return true;
+    if (tool === "manage" && ["move_note", "trash_note", "restore_note", "copy_note"].includes(operation)) return true;
+  }
+  return false;
+}
+
+function planToolName(value: unknown): "retrieve" | "validate" | "write" | "edit" | "manage" | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase().replace(/^obsidian_/, "");
+  if (["retrieve", "validate", "write", "edit", "manage"].includes(normalized)) return normalized as "retrieve" | "validate" | "write" | "edit" | "manage";
+  return undefined;
+}
+
+function setupRequiredPlanResponse(params: ObsidianPlanRequest, ready: ObsidianAppReadyResult): ObsidianPlanOutput {
+  const operationCount = Array.isArray(params.operations) ? params.operations.length : 0;
+  const warnings = appReadyWarnings(ready);
+  return {
+    tool: "obsidian_plan",
+    status: "setup_required",
+    operationCount,
+    valid: false,
+    issues: [{ code: "CHECK_UNAVAILABLE", severity: "error", message: "Obsidian must be open before obsidian_plan can inspect existing vault state." }],
+    plannedEffects: emptyPlannedEffects(),
+    conflicts: [],
+    warnings,
+    degradedSignals: ["app_preflight"],
+    summary: { previewOnly: true, wouldMutateIfExecutedIndividually: false, errorCount: 1, warningCount: warnings.length, infoCount: 0, conflictCount: 0, operationCount },
+    nextActions: [{ priority: 1, action: "configure_vault", label: "Open Obsidian or enable auto-open before retrying the plan preview." }],
+  };
+}
+
+function emptyPlannedEffects(): ObsidianPlanOutput["plannedEffects"] {
+  return { notesCreated: [], notesAppended: [], notesEdited: [], foldersCreated: [], notesMoved: [], notesTrashed: [], notesRestored: [], notesCopied: [], notesReadOrValidated: [], affectedPaths: [] };
+}
+
+function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | undefined, errors: string[], extraWarnings: string[] = [], options: { cliSetup?: ObsidianCliSetupClassification | undefined } = {}): ObsidianRetrieveOutput {
   const profile = params.budget ?? config?.defaultBudget ?? "standard";
   const budget = budgetForProfile(profile, config?.budgetChars);
-  const warnings = [...errors, ...extraWarnings];
+  const warnings = options.cliSetup ? [options.cliSetup.message] : boundedSetupDiagnostics([...errors, ...extraWarnings], config);
   const guidance: AgentGuidance = {
     resultState: "no_match",
     bestMatch: null,
     confidence: {
       level: "none",
       ambiguous: false,
-      rationale: "Obsidian retrieval is not available until setup or app launch succeeds.",
+      rationale: options.cliSetup ? "Obsidian retrieval is not available until the Obsidian CLI is enabled and registered on PATH." : "Obsidian retrieval is not available until setup or app launch succeeds.",
     },
     contextRecommendation: {
       recommended: false,
-      reason: "Do not request context until Obsidian is configured and reachable.",
+      reason: options.cliSetup ? "Do not request context until the Obsidian CLI setup is complete." : "Do not request context until Obsidian is configured and reachable.",
       selected: [],
       mode: "none",
       answerScope: "clarify_first",
@@ -728,8 +1061,8 @@ function setupRequiredResponse(params: RetrievalRequest, config: VaultConfig | u
     nextActions: [
       {
         priority: 1,
-        action: "stop",
-        label: "Tell me your Obsidian vault folder path, or open Obsidian once so I can auto-detect it, then retry."
+        action: options.cliSetup ? "configure_obsidian_cli" : "stop",
+        label: options.cliSetup ? options.cliSetup.instructions : "Tell me your Obsidian vault folder path, or open Obsidian once so I can auto-detect it, then retry."
       },
     ],
   };

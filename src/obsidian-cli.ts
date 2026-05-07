@@ -48,6 +48,15 @@ const READ_ONLY_COMMANDS = new Set([
 const MAX_STDOUT_BYTES = 1024 * 1024;
 const MAX_RECORDS = 500;
 
+export const OBSIDIAN_CLI_SETUP_INSTRUCTIONS = "Go to Obsidian Settings → General → Advanced → CLI (Command line interface), enable it, then click Register for PATH. If CLI is already enabled but PATH is not registered, uncheck/re-check CLI, then click Register for PATH.";
+export const OBSIDIAN_CLI_SETUP_REQUIRED_MESSAGE = `Obsidian CLI setup is required. ${OBSIDIAN_CLI_SETUP_INSTRUCTIONS}`;
+
+export interface ObsidianCliSetupClassification {
+  kind: "disabled_or_unregistered";
+  message: string;
+  instructions: string;
+}
+
 export interface ObsidianCliAdapterOptions {
   cliPath?: string | undefined;
   vaultTarget?: string | undefined;
@@ -111,11 +120,21 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
     const executeOptions = { parseJson: false, allowAutoLaunch: options.allowAutoLaunch ?? false };
     try {
       const result = await this.execute(["version"], executeOptions);
+      const cliSetup = classifyObsidianCliSetupFailure(result);
+      if (cliSetup) {
+        health.setupRequired = "cli";
+        health.errors.push(cliSetup.message);
+        return health;
+      }
       health.available = true;
       health.version = firstNonEmptyLine(result.stdout);
       return health;
     } catch (error) {
       health.errors.push(error instanceof Error ? error.message : String(error));
+      if (classifyObsidianCliSetupFailure(error)) {
+        health.setupRequired = "cli";
+        return health;
+      }
       if (shouldSkipHealthFallback(error)) return health;
     }
     try {
@@ -124,6 +143,7 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
       return health;
     } catch (error) {
       health.errors.push(error instanceof Error ? error.message : String(error));
+      if (classifyObsidianCliSetupFailure(error) || classifyObsidianCliSetupFailure(health.errors)) health.setupRequired = "cli";
       return health;
     }
   }
@@ -309,6 +329,8 @@ export class ObsidianCliAdapter implements ObsidianCliBackend {
       }
     }
     if (result.timedOut) throw new ObsidianCliError(`Obsidian CLI command timed out: ${args[0]}`, "CLI_TIMEOUT");
+    const cliSetup = classifyObsidianCliSetupFailure(result);
+    if (cliSetup) throw new ObsidianCliError(cliSetup.message, "CLI_SETUP_REQUIRED");
     if (result.exitCode !== 0) throw new ObsidianCliError(`Obsidian CLI command failed (${args[0]}): ${result.stderr || result.stdout}`.trim(), "CLI_EXIT");
     return result;
   }
@@ -345,32 +367,105 @@ export function spawnRunner(command: string, args: string[], options: CommandRun
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const timer = setTimeout(() => {
+    let settled = false;
+    let hardKillTimer: NodeJS.Timeout | undefined;
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (hardKillTimer) clearTimeout(hardKillTimer);
+      resolve(result);
+    };
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (hardKillTimer) clearTimeout(hardKillTimer);
+      reject(new ObsidianCliError(error.message, "CLI_SPAWN_ERROR"));
+    };
+    const terminate = () => {
+      if (settled) return;
       timedOut = true;
-      child.kill("SIGTERM");
-    }, options.timeoutMs);
+      try { child.kill("SIGTERM"); } catch { /* ignore kill failures */ }
+      hardKillTimer ??= setTimeout(() => {
+        if (settled) return;
+        try { child.kill("SIGKILL"); } catch { /* ignore kill failures */ }
+        finish({ stdout, stderr, exitCode: 1, timedOut: true });
+      }, 500);
+    };
+    const timer = setTimeout(terminate, options.timeoutMs);
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       stdout += chunk;
       if (stdout.length > options.maxBytes) {
         stdout = stdout.slice(0, options.maxBytes);
-        child.kill("SIGTERM");
+        terminate();
       }
     });
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
-      if (stderr.length > options.maxBytes) stderr = stderr.slice(0, options.maxBytes);
+      if (stderr.length > options.maxBytes) {
+        stderr = stderr.slice(0, options.maxBytes);
+        terminate();
+      }
     });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      reject(new ObsidianCliError(error.message, "CLI_SPAWN_ERROR"));
-    });
+    child.on("error", fail);
     child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, exitCode: code ?? 0, timedOut });
+      finish({ stdout, stderr, exitCode: code ?? (timedOut ? 1 : 0), timedOut });
     });
   });
+}
+
+export function classifyObsidianCliSetupFailure(input: unknown): ObsidianCliSetupClassification | undefined {
+  const messages = cliSetupMessagesFrom(input);
+  const combined = messages.join("\n");
+  if (isCliSetupFailureMessage(combined) || messages.some(isCliSetupFailureMessage)) {
+    return {
+      kind: "disabled_or_unregistered",
+      message: OBSIDIAN_CLI_SETUP_REQUIRED_MESSAGE,
+      instructions: OBSIDIAN_CLI_SETUP_INSTRUCTIONS,
+    };
+  }
+  return undefined;
+}
+
+function cliSetupMessagesFrom(input: unknown): string[] {
+  if (input === undefined || input === null) return [];
+  if (typeof input === "string") return [input];
+  if (input instanceof ObsidianCliError) return [input.message, input.code];
+  if (input instanceof Error) return [input.message, ...errorCodeStrings(input)];
+  if (Array.isArray(input)) return input.flatMap(cliSetupMessagesFrom);
+  if (typeof input === "object") {
+    const record = input as Record<string, unknown>;
+    return [
+      ...(record.setupRequired === "cli" ? [OBSIDIAN_CLI_SETUP_REQUIRED_MESSAGE] : []),
+      ...cliSetupMessagesFrom(record.message),
+      ...cliSetupMessagesFrom(record.code),
+      ...cliSetupMessagesFrom(record.errors),
+      ...cliSetupMessagesFrom(record.warnings),
+      ...cliSetupMessagesFrom(record.stderr),
+      ...cliSetupMessagesFrom(record.stdout),
+    ];
+  }
+  return [String(input)];
+}
+
+function errorCodeStrings(error: Error): string[] {
+  const maybe = error as Error & { code?: unknown; errno?: unknown; syscall?: unknown; path?: unknown };
+  return [maybe.code, maybe.errno, maybe.syscall, maybe.path].filter((value): value is string | number => typeof value === "string" || typeof value === "number").map(String);
+}
+
+function isCliSetupFailureMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  if (!text.trim()) return false;
+  const mentionsObsidian = /obsidian/.test(text);
+  const mentionsCli = /\bcli\b|command[-\s]?line|command line/.test(text);
+  const missingExecutable = /\benoent\b|spawn\s+[^\r\n]*\senoent|command not found|not recognized as (?:an internal|a cmdlet)|executable file not found|no such file or directory/.test(text);
+  if (missingExecutable && (mentionsObsidian || /\bspawn\b|cli_spawn_error/.test(text))) return true;
+  if (!mentionsCli) return false;
+  if (/command line interface[^\r\n]*(?:not enabled|disabled|turn it on)|please turn it on in settings/.test(text)) return true;
+  return /enable[^\r\n]*cli|cli[^\r\n]*(?:enable|disabled|unavailable|not available|not configured|not registered|unregistered)|register[^\r\n]*(?:path|cli)|path[^\r\n]*register|settings[^\r\n]*cli/.test(text);
 }
 
 function shouldTryLaunch(result: CommandResult): boolean {
@@ -387,8 +482,8 @@ function launchCommands(cwd: string | undefined, vaultTarget: string | undefined
   if (obsidianAppPath) return [{ command: obsidianAppPath, args: [] }];
   const uri = obsidianLaunchUri(cwd, vaultTarget);
   if (process.platform === "darwin") return [{ command: "open", args: [uri] }, { command: "open", args: ["-a", "Obsidian"] }];
-  if (process.platform === "win32") return [{ command: "cmd.exe", args: ["/c", "start", "", uri] }];
-  return [{ command: "xdg-open", args: [uri] }, { command: "gtk-launch", args: ["obsidian"] }];
+  if (process.platform === "win32") return [{ command: "explorer.exe", args: [uri] }];
+  return [{ command: "xdg-open", args: [uri] }];
 }
 
 function obsidianLaunchUri(cwd: string | undefined, vaultTarget: string | undefined): string {

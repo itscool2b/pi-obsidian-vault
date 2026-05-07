@@ -1,6 +1,6 @@
 {
   "name": "pi-obsidian-vault",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "type": "module",
   "description": "Agent-safe Obsidian vault access for Pi: auto-detect, retrieve, validate, plan, write, edit, manage, and explicitly destroy Markdown with human approval.",
   "license": "MIT",

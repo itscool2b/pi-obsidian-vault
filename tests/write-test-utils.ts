@@ -95,22 +95,34 @@ export function fakePi() {
   };
 }
 
+const approvalContext = { ui: { select(_title: string, options: string[]) { return options[0]; }, confirm() { return true; } } };
+
+function approveExplicitCommit(tool: any): any {
+  return {
+    ...tool,
+    async execute(toolCallId: string, params: any, signal?: AbortSignal, onUpdate?: unknown, ctx?: unknown) {
+      if (ctx === undefined && params?.dryRun === false) return tool.execute(toolCallId, params, signal, onUpdate, approvalContext);
+      return tool.execute(toolCallId, params, signal, onUpdate, ctx);
+    },
+  };
+}
+
 export function registerWriteTool(vaultRoot: string) {
   const pi = fakePi();
   registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
-  return pi.tools.get("obsidian_write");
+  return approveExplicitCommit(pi.tools.get("obsidian_write"));
 }
 
 export function registerEditTool(vaultRoot: string) {
   const pi = fakePi();
   registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
-  return pi.tools.get("obsidian_edit");
+  return approveExplicitCommit(pi.tools.get("obsidian_edit"));
 }
 
 export function registerManageTool(vaultRoot: string) {
   const pi = fakePi();
   registerObsidianVault(pi as any, { backend: seededFakeCli(), env: { OBSIDIAN_VAULT_PATH: vaultRoot }, configPath: path.join(vaultRoot, "missing-config.json") });
-  return pi.tools.get("obsidian_manage");
+  return approveExplicitCommit(pi.tools.get("obsidian_manage"));
 }
 
 export function registerVaultExtensionForTest(vaultRoot: string, backend: FakeObsidianCliBackend = seededFakeCli()) {
@@ -119,10 +131,13 @@ export function registerVaultExtensionForTest(vaultRoot: string, backend: FakeOb
   return { pi, backend };
 }
 
-export async function executeTool<T = any>(pi: ReturnType<typeof fakePi>, toolName: string, params: unknown): Promise<T> {
+export async function executeTool<T = any>(pi: ReturnType<typeof fakePi>, toolName: string, params: any): Promise<T> {
   const tool = pi.tools.get(toolName);
   if (!tool) throw new Error(`Missing registered tool ${toolName}.`);
-  const response = await tool.execute("test-call", params);
+  const shouldApproveExplicitCommit = params?.dryRun === false && ["obsidian_write", "obsidian_edit", "obsidian_manage"].includes(toolName);
+  const response = shouldApproveExplicitCommit
+    ? await tool.execute("test-call", params, undefined, undefined, approvalContext)
+    : await tool.execute("test-call", params);
   return response.details as T;
 }
 

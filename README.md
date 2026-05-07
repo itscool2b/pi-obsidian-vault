@@ -10,154 +10,138 @@
 
 **Dead-simple, agent-safe Obsidian vault access for Pi.**
 
+**Prerequisite:** In Obsidian Desktop, go to Settings → General → Advanced → CLI (Command line interface), enable it, then click **Register for PATH**.
+
 ```bash
 pi install npm:pi-obsidian-vault
 ```
 
-One install. One remembered vault path. Natural-language retrieval, validation, planning, writing, editing, note management, and explicit destructive actions with human approval built in.
+`pi-obsidian-vault` gives Pi agents safe, bounded access to one local Obsidian vault: retrieve context first, then make explicit note changes only when requested.
 
-`pi-obsidian-vault` is a Pi coding-agent extension. It is not an Obsidian community plugin, desktop GUI, pane, or automatic vault organizer.
-
-## What it is
-
-This package registers these Pi tools:
-
-- `obsidian_config` — remember, forget, or inspect the single vault path setting.
-- `obsidian_retrieve` — candidate-first retrieval, selected context, graph/project summaries, explicit note inspection, and bounded explicit-note relationships.
-- `obsidian_validate` — read-only, workflow-neutral Markdown validation.
-- `obsidian_plan` — read-only non-destructive operation plan previews that never execute.
-- `obsidian_write` — Markdown `create`, `append`, and `create_folder`. `create` can infer a safe path from `title` / content.
-- `obsidian_edit` — structured edits: `replace_section`, `insert_under_heading`, `update_frontmatter`, `remove_frontmatter`, `replace_exact_text`.
-- `obsidian_manage` — single-note `move_note`, recoverable `trash_note`, explicit `restore_note`, and byte-for-byte `copy_note`.
-- `obsidian_destroy` — explicit destructive operations: `delete_note`, `delete_folder`, `replace_note`, and `empty_trash`.
-- `/obsidian-vault` — simple redacted status plus session auto-write/auto-destroy controls.
-
-## Why it exists
-
-Pi works best when you can just ask for the outcome. The extension tries to auto-detect your local Obsidian Desktop vault. If that fails, tell the agent your vault folder path once and it can remember it.
-
-Normal non-destructive mutation flow:
-
-```text
-agent calls tool → extension previews internally → human chooses Yes / No / Auto-write this session → commit only if approved
-```
-
-Destructive flow is separate and deliberately loud:
-
-```text
-agent calls obsidian_destroy → extension previews internally → human chooses Yes, destroy / No / Auto-destroy this session → destroy only if approved
-```
-
-No dry-run/token/retry dance. Hard rails still block unsafe paths, accidental overwrites, wildcard/bulk/inferred destructive operations, shell/network commands, and local path leaks. Permanent destructive actions live in the separate `obsidian_destroy` tool and require separate destructive approval.
+**Auto-detect comes first.** Open your vault in Obsidian Desktop once, reload Pi, and ask. Pi can also auto-open the configured/detected vault when a vault-touching tool needs it. Manual `/obsidian-vault set-vault` is only the fallback when auto-detect cannot find the vault.
 
 ## Quick start
 
+Auto-detect is the normal path:
+
 1. Install the package.
 2. Open your vault in Obsidian Desktop once.
-3. Restart or `/reload` Pi.
-4. Talk naturally:
+3. Restart Pi or run `/reload`.
+4. Ask naturally.
+
+```text
+find my notes about project roadmap
+```
 
 ```text
 make a note about the automatic vault detection idea
 ```
 
-If auto-detection fails, say something like:
-
 ```text
-use this Obsidian vault: /home/me/Documents/My Vault
+append today's decision to Projects/Roadmap.md
 ```
 
-The agent can call `obsidian_config` with `operation: "set_vault"`, or you can run:
+If Pi cannot see your vault, it asks for the vault folder path instead of guessing. You can also set it directly:
 
 ```text
 /obsidian-vault set-vault /home/me/Documents/My Vault
 ```
 
-## Configuration
+## What it is
 
-There is only one normal persistent setting:
+This is a Pi coding-agent extension and skill package for one local Obsidian vault. It keeps agents on a small, explicit tool surface instead of broad filesystem access.
 
-```json
-{ "vaultPath": "/absolute/path/to/your/vault" }
-```
+It is not an Obsidian community plugin, desktop GUI, pane, or automatic vault organizer.
 
-You normally do not edit that file. Let the agent remember it with `obsidian_config`, or use the slash command above.
+## Tools at a glance
 
-Resolution order:
+The package registers eight Pi tools plus one slash command:
 
-1. remembered `vaultPath`
-2. Obsidian Desktop auto-detection
-3. setup-needed response asking for the vault folder path
+| Tool or command | Use it for | Supports |
+| --- | --- | --- |
+| `obsidian_config` | Remembering or checking the vault path | `set_vault`, `forget_vault`, `status` |
+| `obsidian_retrieve` | Read-only note discovery and bounded context | `auto`, `search`, `context`, `graph`, `project`, `note`, `relationships` |
+| `obsidian_validate` | Advisory Markdown checks | `existing_note`, `proposed_content` |
+| `obsidian_plan` | Previewing non-destructive operation sequences | preview-only, max 25 operations, never executes |
+| `obsidian_write` | Creating notes, appending Markdown, creating folders | `create`, `append`, `create_folder` |
+| `obsidian_edit` | Structured edits to existing notes | `replace_section`, `insert_under_heading`, `update_frontmatter`, `remove_frontmatter`, `replace_exact_text` |
+| `obsidian_manage` | Moving, trashing, restoring, or copying one note | `move_note`, `trash_note`, `restore_note`, `copy_note` |
+| `obsidian_destroy` | Explicit permanent destructive actions | `delete_note`, `delete_folder`, `replace_note`, `empty_trash` |
+| `/obsidian-vault` | Status, vault selection, app readiness, and session approval controls | status, `set-vault`, `forget-vault`, auto-open, auto-write, auto-destroy |
 
-Everything else is hardcoded sane defaults:
+## Configuration and vault resolution
 
-- retrieve budget: `expanded`
-- relationship budget: `expanded`
-- preview cap: `100000` characters
-- validation issue cap: `50`
-- trash folder: `_Trash`
+Most users do not configure anything. Pi either auto-detects the vault from Obsidian Desktop or remembers the one path you set. Auto-open is enabled by default for vault-touching tools and can be toggled per session.
 
-## `/obsidian-vault`
+There is only one normal persistent setting: `vaultPath`.
 
-Normal status is intentionally small:
-
-```text
-Obsidian Vault: ready
-Vault: auto-detected | remembered | missing
-Mutations: approval required | auto-write this session
-Destructive mutations: destructive approval required | auto-destroy this session
-Auto-write this session: disabled
-Auto-destroy this session: disabled
-Trash folder: _Trash
-```
-
-Session commands:
+It is stored in:
 
 ```text
+$HOME/.pi/agent/obsidian-vault.json
+```
+
+Normal users should set it through `obsidian_config` or `/obsidian-vault set-vault`; you do not need to edit config files by hand.
+
+Technical resolution order:
+
+1. `OBSIDIAN_VAULT_PATH` hidden/dev override
+2. remembered `vaultPath`
+3. Obsidian Desktop auto-detect
+4. setup-needed response asking for the vault folder path
+
+`/obsidian-vault status` reports local vault path and mutation readiness. It is intentionally small and is not a complete retrieval/CLI health check.
+
+Useful commands:
+
+```text
+/obsidian-vault
+/obsidian-vault set-vault <path>
+/obsidian-vault forget-vault
+/obsidian-vault auto-open status
+/obsidian-vault auto-open on
+/obsidian-vault auto-open off
 /obsidian-vault auto-write status
 /obsidian-vault auto-write on
 /obsidian-vault auto-write off
 /obsidian-vault auto-destroy status
 /obsidian-vault auto-destroy on
 /obsidian-vault auto-destroy off
-/obsidian-vault set-vault <path>
-/obsidian-vault forget-vault
 ```
 
-## Tool overview
+`/obsidian vault ...` also works as an alias.
 
-| Tool or command | Purpose | Safety posture |
-| --- | --- | --- |
-| `obsidian_config` | Remember/forget/status for the one vault path setting | No vault content mutation |
-| `obsidian_retrieve` | Search, context, graph, project, explicit note inspection, explicit relationships | Read-only, candidate-first, budgeted, no broad dumps |
-| `obsidian_validate` | Validate one existing note or proposed Markdown content | Read-only, workflow-neutral, advisory |
-| `obsidian_plan` | Preview bounded explicit non-destructive operations | Read-only; never executes, commits, stages, batches, or writes files |
-| `obsidian_write` | Create Markdown notes, append Markdown, create folders | Human approval or session auto-write before commit; no overwrite |
-| `obsidian_edit` | Structured edits to existing notes | Human approval or session auto-write before commit; exact structured targets |
-| `obsidian_manage` | Single-note move, recoverable move-to-trash, restore, copy | Human approval or session auto-write before commit; not permanent deletion; no link rewriting |
-| `obsidian_destroy` | Permanent note delete, recursive folder delete, full-note replace, empty trash | Separate destructive approval or session auto-destroy; no inferred targets |
-| `/obsidian-vault` | Status and session controls | Redacted, simple |
+`Auto-open Obsidian`, `Auto-write this session`, and `Auto-destroy this session` are in-memory Pi session choices. Auto-open only checks/opens the configured or detected vault; it never authorizes writes or destruction. Auto-write and auto-destroy are separate, and auto-write never authorizes destructive operations.
+
+## Agent workflow
+
+For agents and power users, the intended flow is:
+
+1. Retrieve candidates with `obsidian_retrieve`.
+2. Read `agentGuidance`.
+3. Request selected context only for exact returned `selectedRef` paths.
+4. Validate or plan when useful.
+5. Call the smallest write/edit/manage/destroy tool that matches the user's explicit request.
+
+Retrieval is candidate-first, bounded, and read-only. It does not return full note bodies by default.
+
+Use `mode: "note"` only with one explicit safe vault-relative Markdown path. Use `mode: "relationships"` only around one explicit Markdown note; there is no vault-wide backlink scan or broad vault/backlink scan.
+
+`obsidian_validate` is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zettelkasten, daily-note structure, or project-note structure are not errors. Suspicious path-like strings inside Markdown are warning-severity advisory issues.
+
+`obsidian_plan` is preview-only. It never executes, stages, batches, writes files, or creates a transaction. If `dryRun: false` appears inside a plan, it is ignored with a warning.
+
+For normal non-destructive mutation requests, agents should omit `dryRun`; the registered Pi tools preview internally and ask for human approval when the interactive UI is available. `dryRun: true` never commits. Destructive operations use `obsidian_destroy` and separate destructive approval.
 
 Supported top-level request fields for `obsidian_retrieve` are exactly `query`, `mode`, `path`, `selected`, `scope`, `budget`, `maxCandidates`, `maxRelated`, `includeBacklinks`, `includeOutgoing`, `includeSections`, and `explain`.
 
 Valid `budget` values: `tiny`, `standard`, `expanded`.
 
-## Recommended agent workflow
-
-1. Use `obsidian_retrieve` for candidate discovery with `mode: "search"`, `mode: "graph"`, or bounded `mode: "project"`.
-2. Read `agentGuidance`; when it recommends selected context, call `obsidian_retrieve` with `mode: "context"` and only exact returned `selectedRef` paths.
-3. Use `mode: "note"` only with one explicit safe vault-relative Markdown path.
-4. Use `mode: "relationships"` only for one explicit safe Markdown path. There is no vault-wide backlink scan or broad vault/backlink scan.
-5. Use `obsidian_validate` for read-only Markdown checks.
-6. Use `obsidian_plan` for read-only non-destructive previews. It never executes or commits; use `obsidian_destroy` `dryRun: true` for destructive previews.
-7. For normal mutation requests, call the right mutation tool and omit `dryRun`; the extension previews internally, asks the human, then commits if approved.
-8. Use `obsidian_destroy` only for explicit permanent deletion, recursive folder deletion, full-note replacement, or emptying trash. Auto-write does not apply; destructive approval is separate.
-9. Use `dryRun: true` only when the user explicitly asks to preview/check/plan without changing the vault.
-10. If setup is missing, ask for the vault folder path and call `obsidian_config` `set_vault`.
-
 ## Examples
 
-### `obsidian_config`
+Representative calls for each public tool:
+
+### Configure
 
 ```json
 { "operation": "set_vault", "vaultPath": "/home/me/Documents/My Vault" }
@@ -171,19 +155,15 @@ Valid `budget` values: `tiny`, `standard`, `expanded`.
 { "operation": "status" }
 ```
 
-### `obsidian_retrieve` search
+### Retrieve
 
 ```json
 { "query": "project roadmap", "mode": "search", "budget": "standard" }
 ```
 
-### `obsidian_retrieve` graph
-
 ```json
 { "query": "Project Roadmap connections", "mode": "graph", "budget": "expanded" }
 ```
-
-### `obsidian_retrieve` selected context
 
 ```json
 {
@@ -194,21 +174,15 @@ Valid `budget` values: `tiny`, `standard`, `expanded`.
 }
 ```
 
-### `obsidian_retrieve` explicit note inspection
-
 ```json
 { "mode": "note", "path": "Projects/Roadmap.md", "budget": "tiny" }
 ```
-
-### `obsidian_retrieve` explicit relationships
 
 ```json
 { "mode": "relationships", "path": "Projects/Roadmap.md", "budget": "standard", "maxRelated": 10, "includeBacklinks": true }
 ```
 
-### `obsidian_validate` proposed content
-
-Validation is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zettelkasten, daily-note structure, or project-note structure are not errors. Suspicious path-like strings inside content are warning-severity advisory issues.
+### Validate
 
 ```json
 {
@@ -218,13 +192,11 @@ Validation is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zett
 }
 ```
 
-### `obsidian_validate` existing note
-
 ```json
 { "target": "existing_note", "path": "Projects/Roadmap.md", "budget": "tiny" }
 ```
 
-### `obsidian_plan`
+### Plan
 
 ```json
 {
@@ -235,25 +207,27 @@ Validation is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zett
 }
 ```
 
-### `obsidian_write` create with inferred path
+### Write
 
 ```json
 { "operation": "create", "title": "New Idea", "folderHint": "Projects", "content": "# New Idea\n\nDetails." }
 ```
 
-### `obsidian_write` append
-
 ```json
 { "operation": "append", "path": "Projects/Roadmap.md", "content": "\n## Update\n\nNew notes." }
 ```
 
-### `obsidian_edit` exact text
+```json
+{ "operation": "create_folder", "path": "Projects/New Area" }
+```
+
+### Edit
 
 ```json
 { "operation": "replace_exact_text", "path": "Projects/Roadmap.md", "oldText": "Old phrase", "newText": "New phrase" }
 ```
 
-### `obsidian_manage` move/trash/restore/copy
+### Manage one note
 
 ```json
 { "operation": "move_note", "fromPath": "Projects/Roadmap.md", "toPath": "Archive/Roadmap.md" }
@@ -271,7 +245,11 @@ Validation is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zett
 { "operation": "copy_note", "fromPath": "Projects/Roadmap.md", "toPath": "Archive/Roadmap Copy.md" }
 ```
 
-### `obsidian_destroy` destructive operations
+`trash_note` is a recoverable move-to-trash, not permanent deletion. `copy_note` is byte-for-byte and does not rewrite links.
+
+### Destroy explicitly
+
+These require explicit destructive approval.
 
 ```json
 { "operation": "delete_note", "path": "Archive/Old.md" }
@@ -289,68 +267,46 @@ Validation is workflow-neutral. Missing frontmatter, tags, templates, PARA, Zett
 { "operation": "empty_trash" }
 ```
 
-## Human approval workflow
-
-Mutation tools (`obsidian_write`, `obsidian_edit`, `obsidian_manage`, `obsidian_destroy`) compute a preview before committing. Non-destructive mutation dialogs offer:
-
-```text
-Yes
-No
-Auto-write this session
-```
-
-`Auto-write this session` approves the current non-destructive change and remembers the choice only in memory for the current Pi session. Future non-destructive mutations still run internal preview and safety checks, but skip prompts until the session resets or you run `/obsidian-vault auto-write off`.
-
-`dryRun: true` is always preview-only, even when session auto-write or auto-destroy is enabled.
-
-`obsidian_destroy` uses separate destructive choices: `Yes, destroy`, `No`, and `Auto-destroy this session`. Auto-write never authorizes destructive operations. Without an interactive approval UI, destructive calls return previews only unless auto-destroy was already enabled in the same Pi session.
-
-## Security model summary
+## Safety model
 
 Read-only tools (`obsidian_retrieve`, `obsidian_validate`, `obsidian_plan`) do not mutate the vault.
 
-Hard rails refuse:
+Normal mutation tools (`obsidian_write`, `obsidian_edit`, `obsidian_manage`) preview before commit and use human approval or session auto-write through Pi. `obsidian_destroy` is the only tool for permanent delete, recursive folder delete, full-note replacement, or empty trash, and it uses separate destructive approval.
 
-- unsafe vault-relative paths, absolute targets, traversal, hidden paths, and `.obsidian` paths
-- accidental overwrites, suffixing, auto-renaming, inferred permanent delete, and destructive folder operations outside `obsidian_destroy`
-- wildcard or bulk operations; recursive deletion only for one explicit `obsidian_destroy delete_folder` target after destructive approval
-- broad vault scans/dumps and broad backlink scans
-- link rewriting
-- GUI/UI-open behavior, shell execution, network calls, or arbitrary CLI commands
+Hard rails include:
 
-Outputs redact vault roots, absolute local paths, CLI paths, lock keys, shell/network details, and arbitrary local filesystem details. Vault-relative paths such as `Projects/Roadmap.md` are allowed.
+- safe vault-relative Markdown paths only for note targets
+- no absolute paths, traversal, hidden paths, `.obsidian` paths, wildcard or bulk operations
+- no overwrite, suffixing, auto-renaming, fuzzy destructive targets, or accidental full-note overwrite
+- no broad vault scans, broad vault dumps, or broad backlink scans
+- no automatic link rewriting
+- no templates or automatic organization
+- no transactions, batch execution, arbitrary CLI commands, Shell execution, network calls, GUI automation, pane automation, or user-requested UI-open behavior
 
-Common refusal/error codes include `TRASH_PATH_OUTSIDE_TRASH`, `SOURCE_NOT_FILE`, `TARGET_EXISTS`, and `UNSAFE_PATH`.
+The retrieval adapter uses a read-only command allowlist and `shell:false`. The only desktop launch behavior is the centralized auto-open preflight for the configured/detected vault.
 
-## Limitations
+Outputs are designed and tested to redact common sensitive local details such as vault roots and absolute paths. Vault-relative paths such as `Projects/Roadmap.md` are normal and may appear.
 
-Committed smoke tests use temporary or disposable vaults only. Real-vault checks are opt-in/manual only.
+## Limitations and troubleshooting
 
-- Retrieval depends on the controlled Obsidian CLI adapter.
-- Relationship/backlink data degrades when the CLI or metadata is unavailable.
-- Mutation tools operate on explicit targets only; no fuzzy note picking for edits/moves.
-- `copy_note` is byte-for-byte and does not rewrite links.
-- `trash_note` is recoverable move-to-trash, not permanent deletion. Use `obsidian_destroy` only when permanent destruction is explicitly requested.
+- Retrieval may degrade or return setup guidance when Obsidian Desktop or the controlled CLI adapter is unavailable.
+- If retrieval or existing-note validation says Obsidian CLI setup is required: go to Obsidian Settings → General → Advanced → CLI (Command line interface), enable it, then click Register for PATH. If CLI is already enabled but PATH is not registered, uncheck/re-check CLI, then click Register for PATH.
+- Relationship/backlink metadata can degrade; there is no broad backlink scan.
+- Mutations require explicit safe targets. The tools do not fuzzy-pick notes for edits, moves, deletes, or restores.
+- Move/copy destinations must not already exist. No overwrite means existing destinations are refused rather than overwritten.
+- `copy_note` preserves bytes and does not rewrite links.
+- `trash_note` moves into `_Trash` by default. Permanent destruction lives only in `obsidian_destroy`.
+- Release checks use temporary or disposable vaults. Real-vault checks are opt-in/manual only.
+- Release safety posture includes no-overwrite, no-shell/network, no-broad-scan, human approval/auto-write separation, and redaction checks.
 
-## Troubleshooting
-
-### Vault not found
-
-Open the vault in Obsidian Desktop once, then `/reload` Pi. Or tell the agent the vault folder path so it can call `obsidian_config` `set_vault`.
-
-### I enabled auto-write and want prompts again
+If auto-write or auto-destroy is on and you want prompts again:
 
 ```text
 /obsidian-vault auto-write off
-```
-
-### I enabled auto-destroy and want destructive prompts again
-
-```text
 /obsidian-vault auto-destroy off
 ```
 
-### I want to use a different vault
+If the vault is wrong:
 
 ```text
 /obsidian-vault set-vault /path/to/other/vault
@@ -358,16 +314,6 @@ Open the vault in Obsidian Desktop once, then `/reload` Pi. Or tell the agent th
 
 or ask the agent naturally.
 
-## Release/version info
+## Security and issues
 
-Current package version: `pi-obsidian-vault` `0.2.0`.
-
-Install command:
-
-```bash
-pi install npm:pi-obsidian-vault
-```
-
-## Contributing and issues
-
-Please report security-sensitive issues using the guidance in [SECURITY.md](./SECURITY.md). Do not include private vault contents, secrets, or absolute local paths in public issues.
+Please report security-sensitive issues using [SECURITY.md](./SECURITY.md). Do not include private vault contents, secrets, or absolute local paths in public issues.

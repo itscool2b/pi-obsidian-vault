@@ -22,7 +22,7 @@ describe("public tool surface", () => {
     const pi = fakePi();
     registerObsidianVault(pi as any, { backend: seededFakeCli() });
     expect([...pi.tools.keys()]).toEqual([...PUBLIC_TOOL_NAMES]);
-    expect([...pi.commands.keys()]).toEqual(["obsidian-vault"]);
+    expect([...pi.commands.keys()]).toEqual(["obsidian-vault", "obsidian"]);
   });
 
   it("keeps the public operation matrix limited to the release-hardened surface", () => {

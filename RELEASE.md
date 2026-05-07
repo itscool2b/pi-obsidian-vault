@@ -1,11 +1,11 @@
-# Release Checklist: pi-obsidian-vault 0.2.0
+# Release Checklist: pi-obsidian-vault 0.2.3
 
-This checklist is the public-release gate for `pi-obsidian-vault` `0.2.0`.
+This checklist is the public-release gate for `pi-obsidian-vault` `0.2.3`.
 
 ## Package identity
 
 - Package name: `pi-obsidian-vault`
-- Version: `0.2.0`
+- Version: `0.2.3`
 - License: `MIT` (`LICENSE`)
 - Repository: <https://github.com/itscool2b/pi-obsidian-vault>
 - Exact Pi install command: `pi install npm:pi-obsidian-vault`
@@ -42,7 +42,9 @@ The user-facing model has one normal persistent setting:
 
 The agent can save it through `obsidian_config` or the user can run `/obsidian-vault set-vault <path>`. If no path is remembered, the extension tries Obsidian Desktop auto-detection.
 
-Everything else is hardcoded sane defaults and cannot enable unsafe powers, broad scans, accidental overwrite, link rewriting, unsafe path handling, arbitrary CLI commands, shell/network behavior, or UI-open behavior. Explicit permanent deletion/full-note replacement is available only through `obsidian_destroy` with separate destructive approval.
+Prerequisite: Obsidian Desktop's CLI must be enabled and registered for PATH for CLI-backed retrieval and existing-note validation. Setup failures should return deterministic guidance instead of raw CLI output.
+
+Everything else is hardcoded sane defaults and cannot enable unsafe powers, broad scans, accidental overwrite, link rewriting, unsafe path handling, arbitrary CLI commands, shell/network behavior, or arbitrary UI-open behavior. Auto-open is limited to centralized app-readiness preflight for the configured/detected vault. Explicit permanent deletion/full-note replacement is available only through `obsidian_destroy` with separate destructive approval.
 
 ## Intended package contents
 

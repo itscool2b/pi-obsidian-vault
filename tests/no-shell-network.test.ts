@@ -17,6 +17,7 @@ describe("process safety", () => {
   it("centralizes process spawning and keeps shell/network APIs out of vault tools", async () => {
     const files = await sourceFiles(path.join(process.cwd(), "src"));
     const intentionalWriteFiles = new Set(["src/vault-writer.ts", "src/write-engine.ts", "src/write-guidance.ts", "src/write-types.ts", "src/vault-editor.ts", "src/edit-engine.ts", "src/edit-guidance.ts", "src/edit-types.ts", "src/markdown-section-editor.ts", "src/frontmatter-editor.ts", "src/exact-text-editor.ts", "src/vault-manager.ts", "src/manage-engine.ts", "src/manage-guidance.ts", "src/manage-types.ts", "src/vault-destroyer.ts", "src/destroy-engine.ts", "src/destroy-guidance.ts", "src/destroy-types.ts", "src/target-lock.ts"]);
+    const intentionalDesktopOpenFiles = new Set(["src/obsidian-app.ts"]);
     const relativeFiles = files.map((file) => path.relative(process.cwd(), file));
     expect(relativeFiles).toContain("src/agent-guidance.ts");
     expect(relativeFiles).toContain("src/note-inspection.ts");
@@ -33,14 +34,14 @@ describe("process safety", () => {
       }
       expect(text).not.toMatch(/shell:\s*true/);
       expect(text).not.toMatch(/\bfetch\(|https?\.request|net\.connect/);
-      if (!intentionalWriteFiles.has(relative)) {
+      if (!intentionalWriteFiles.has(relative) && !intentionalDesktopOpenFiles.has(relative)) {
         expect(text).not.toMatch(/\b(open|create|append|prepend|rename|delete|move)\s*\(/);
       }
       if (relative === "src/vault-manager.ts") {
         expect(text).not.toMatch(/\b(unlink|rm|rmdir|remove)\s*\(/);
         expect(text).not.toMatch(/node:fs\/promises[\s\S]*\b(unlink|rm|rmdir|remove)\b/);
       } else if (relative !== "src/vault-destroyer.ts") expect(text).not.toMatch(/\b(rename|unlink|rm|rmdir|remove)\s*\(/);
-      if (relative.startsWith("src/") && relative !== "src/obsidian-cli.ts") {
+      if (relative.startsWith("src/") && relative !== "src/obsidian-cli.ts" && !intentionalDesktopOpenFiles.has(relative)) {
         expect(text).not.toMatch(/\b(xdg-open|gtk-launch)\b/);
         expect(text).not.toMatch(/command:\s*["']open["']/);
       }

@@ -83,16 +83,17 @@ export async function obsidianValidate(backend: ObsidianCliBackend | undefined, 
   }
 }
 
-export function setupRequiredValidationResponse(request: ObsidianValidateRequest, errors: string[], warnings: string[] = [], path?: string | undefined): ObsidianValidateOutput {
+export function setupRequiredValidationResponse(request: ObsidianValidateRequest, errors: string[], warnings: string[] = [], path?: string | undefined, options: { setupMessage?: string | undefined } = {}): ObsidianValidateOutput {
   const target = request.target === "existing_note" || request.target === "proposed_content" ? request.target : undefined;
+  const setupMessage = options.setupMessage?.trim();
   return emptyValidationOutput({
     status: "setup_required",
     target,
     checkedScope: checkedScopeFor(target),
     path,
-    error: validationError("OBSIDIAN_UNAVAILABLE", "setup", "Existing-note validation requires configured and reachable read-only Obsidian access."),
-    warnings: [...errors.map(() => "Obsidian validation setup is incomplete; no note was read."), ...warnings.map(() => "Obsidian validation setup warning was reported without exposing local paths.")],
-    action: { priority: 1, action: "configure_obsidian", label: "Configure Obsidian access before retrying existing-note validation." },
+    error: validationError("OBSIDIAN_UNAVAILABLE", "setup", setupMessage ? "Existing-note validation requires the Obsidian CLI to be enabled and registered on PATH." : "Existing-note validation requires configured and reachable read-only Obsidian access."),
+    warnings: setupMessage ? [setupMessage] : [...errors.map(() => "Obsidian validation setup is incomplete; no note was read."), ...warnings.map(() => "Obsidian validation setup warning was reported without exposing local paths.")],
+    action: { priority: 1, action: "configure_obsidian", label: setupMessage || "Configure Obsidian access before retrying existing-note validation." },
   });
 }
 

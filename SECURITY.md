@@ -6,7 +6,7 @@
 
 | Package | Version |
 | --- | --- |
-| `pi-obsidian-vault` | `0.2.0` |
+| `pi-obsidian-vault` | `0.2.3` |
 
 ## Security model
 
@@ -14,7 +14,7 @@
 
 The only normal persistent setting is the remembered Obsidian vault folder path. If auto-detection fails, the user can tell the agent the vault path and the agent can save it through `obsidian_config` or `/obsidian-vault set-vault <path>`.
 
-Other behavior is hardcoded: safety rails are not configurable and cannot be relaxed by config.
+Safety rails are not configurable and cannot be relaxed by config. Desktop app readiness has narrow controls: auto-open is enabled by default for vault-touching operations, can be disabled for the session/environment, and never authorizes mutation or destruction by itself.
 
 ### Safe local operations
 
@@ -45,7 +45,7 @@ These tools are read-only:
 - `obsidian_validate`
 - `obsidian_plan`
 
-They do not write, append, edit, move, trash, restore, copy, delete, destroy, rewrite links, create templates, open Obsidian UI, execute arbitrary commands, or perform user-requested shell/network actions.
+They do not write, append, edit, move, trash, restore, copy, delete, destroy, rewrite links, create templates, automate Obsidian panes/UI, execute arbitrary commands, or perform user-requested shell/network actions. They may trigger the centralized app-readiness preflight, which only checks whether Obsidian is running and may open the configured/detected vault.
 
 ### No broad scans or dumps
 
@@ -65,12 +65,14 @@ The extension does not support:
 - Automatic link rewriting or backlinks mutation.
 - Templates or template registries.
 - Batch execution, staged commits, or transaction commits.
-- GUI, Obsidian pane UI, Obsidian community plugin UI, or UI-open commands.
+- GUI automation, Obsidian pane UI automation, Obsidian community plugin UI, or user-requested UI-open commands.
 - Arbitrary CLI commands.
+
+The only allowed desktop launch behavior is the centralized Obsidian app preflight. It opens only the configured/detected vault via safe platform launchers/`obsidian://open`, returns clean setup errors on unsupported/headless environments, and does not bypass human approval or destructive approval.
 
 ### Shell and network posture
 
-The extension does not provide shell or network tools. Retrieval uses the Obsidian CLI adapter as a controlled CLI adapter and controlled backend. CLI invocation is constrained to retrieval/status behavior and is not exposed as arbitrary command execution.
+The extension does not provide shell or network tools. Retrieval uses the Obsidian CLI adapter as a controlled CLI adapter and controlled backend. CLI invocation is constrained to retrieval/status behavior and is not exposed as arbitrary command execution. Desktop process checks and launch commands are centralized in the app-readiness layer and are not agent-controlled.
 
 ### Redaction policy
 

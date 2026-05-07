@@ -6,7 +6,7 @@ export type ConfidenceLevel = "high" | "medium" | "low" | "none";
 export type AgentResultState = "answer_from_discovery" | "request_context" | "ambiguous" | "no_match" | "context_returned";
 export type AnswerScope = "discovery_only" | "needs_selected_context" | "clarify_first" | "use_returned_context";
 export type ContextRecommendationMode = "none" | "context";
-export type StructuredAction = "answer" | "request_context" | "clarify" | "refine_query" | "inspect_alternative" | "stop";
+export type StructuredAction = "answer" | "request_context" | "clarify" | "refine_query" | "inspect_alternative" | "configure_obsidian_cli" | "stop";
 export type DegradedSignal = "metadata" | "backlinks" | "backlinks_unavailable" | "properties" | "recents" | "relationships" | "relationships_limited" | "sections_limited" | "parsing" | "preview" | "budget";
 export type EvidenceQuality = "strong" | "supporting" | "weak" | "ignored";
 
@@ -222,6 +222,7 @@ export interface ObsidianCliHealth {
   version?: string | undefined;
   cliPath: string;
   vaultTarget?: string | undefined;
+  setupRequired?: "cli" | undefined;
   errors: string[];
   warnings: string[];
 }

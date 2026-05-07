@@ -17,6 +17,9 @@ export const OBSIDIAN_DEFAULT_BUDGET_CHARS: Record<BudgetProfile, number> = {
 export const OBSIDIAN_MAX_PREVIEW_CHARS = 100_000;
 export const OBSIDIAN_MAX_VALIDATION_ISSUES = 50;
 export const OBSIDIAN_DEFAULT_TRASH_FOLDER = "_Trash";
+export const OBSIDIAN_AUTO_OPEN_DEFAULT = true;
+export const OBSIDIAN_OPEN_TIMEOUT_MS = 30_000;
+export const OBSIDIAN_LAUNCH_COMMAND_TIMEOUT_MS = 5_000;
 
 interface ConfigFile {
   vaultPath?: unknown;
@@ -41,7 +44,12 @@ export interface VaultConfig {
   cliTimeoutMs: number;
   autoLaunch: boolean;
   launchWaitMs: number;
+  autoOpenObsidian: boolean;
+  openTimeoutMs: number;
+  launchCommandTimeoutMs: number;
   obsidianAppPath?: string | undefined;
+  vaultName?: string | undefined;
+  vaultOpenUri?: string | undefined;
   vaultTarget?: string | undefined;
   defaultBudget: BudgetProfile;
   defaultRetrieveBudget: BudgetProfile;
@@ -108,6 +116,9 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
   const warnings: string[] = [];
 
   const envVaultPath = env.OBSIDIAN_VAULT_PATH?.trim();
+  const envVaultName = nonEmptyEnv(env.OBSIDIAN_VAULT_NAME);
+  const envVaultOpenUri = safeObsidianOpenUri(env.OBSIDIAN_VAULT_URI) ? env.OBSIDIAN_VAULT_URI.trim() : undefined;
+  if (env.OBSIDIAN_VAULT_URI?.trim() && !envVaultOpenUri) warnings.push("Ignoring OBSIDIAN_VAULT_URI because it is not a safe obsidian://open URI.");
   const rememberedVaultPath = stringFromConfig(fileConfig, "vaultPath");
   let rawVaultPath = envVaultPath || rememberedVaultPath;
   let vaultPathSource: VaultConfig["vaultPathSource"] = envVaultPath ? "env" : rememberedVaultPath ? "remembered" : "missing";
@@ -127,10 +138,15 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
       vaultRoot = detected.vaultRoot;
       vaultPathSource = "auto";
       warnings.push(...detected.warnings);
-    } else if (!rawVaultPath) {
+    } else if (!rawVaultPath && !envVaultName && !envVaultOpenUri) {
       errors.push("I couldn't find your Obsidian vault. Tell me the vault folder path and I can remember it.");
     }
   }
+
+  const autoOpenObsidian = booleanFromEnv(env.OBSIDIAN_AUTO_OPEN, OBSIDIAN_AUTO_OPEN_DEFAULT, warnings, "OBSIDIAN_AUTO_OPEN");
+  const openTimeoutMs = positiveIntegerFromEnv(env.OBSIDIAN_OPEN_TIMEOUT_MS, OBSIDIAN_OPEN_TIMEOUT_MS, warnings, "OBSIDIAN_OPEN_TIMEOUT_MS");
+  const launchCommandTimeoutMs = positiveIntegerFromEnv(env.OBSIDIAN_LAUNCH_COMMAND_TIMEOUT_MS, OBSIDIAN_LAUNCH_COMMAND_TIMEOUT_MS, warnings, "OBSIDIAN_LAUNCH_COMMAND_TIMEOUT_MS");
+  const obsidianAppPath = nonEmptyEnv(env.OBSIDIAN_APP_PATH);
 
   const config: VaultConfig = {
     vaultPathSource,
@@ -138,6 +154,9 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
     cliTimeoutMs: 10_000,
     autoLaunch: false,
     launchWaitMs: 4_000,
+    autoOpenObsidian,
+    openTimeoutMs,
+    launchCommandTimeoutMs,
     defaultBudget: OBSIDIAN_DEFAULT_RETRIEVE_BUDGET,
     defaultRetrieveBudget: OBSIDIAN_DEFAULT_RETRIEVE_BUDGET,
     defaultRelationshipBudget: OBSIDIAN_DEFAULT_RELATIONSHIP_BUDGET,
@@ -152,6 +171,12 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Vault
   };
   if (rawVaultPath) config.rawVaultPath = rawVaultPath;
   if (vaultRoot) config.vaultRoot = vaultRoot;
+  if (obsidianAppPath) config.obsidianAppPath = obsidianAppPath;
+  if (envVaultName) {
+    config.vaultName = envVaultName;
+    config.vaultTarget = envVaultName;
+  }
+  if (envVaultOpenUri) config.vaultOpenUri = envVaultOpenUri;
   return config;
 }
 
@@ -293,6 +318,35 @@ async function executableInPath(binary: string, pathValue: string | undefined): 
     }
   }
   return false;
+}
+
+function nonEmptyEnv(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function booleanFromEnv(value: string | undefined, fallback: boolean, warnings: string[], name: string): boolean {
+  const trimmed = value?.trim().toLowerCase();
+  if (!trimmed) return fallback;
+  if (["1", "true", "yes", "on"].includes(trimmed)) return true;
+  if (["0", "false", "no", "off"].includes(trimmed)) return false;
+  warnings.push(`Ignoring ${name} because it is not true/false.`);
+  return fallback;
+}
+
+function positiveIntegerFromEnv(value: string | undefined, fallback: number, warnings: string[], name: string): number {
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
+  if (Number.isInteger(parsed) && parsed > 0 && parsed <= 300_000) return parsed;
+  warnings.push(`Ignoring ${name} because it is not a positive timeout in milliseconds.`);
+  return fallback;
+}
+
+function safeObsidianOpenUri(value: string | undefined): value is string {
+  const trimmed = value?.trim();
+  const openPrefix = "obsidian://" + "open";
+  return Boolean(trimmed && (trimmed.toLowerCase() === openPrefix || trimmed.toLowerCase().startsWith(`${openPrefix}?`)) && !/[\r\n]/.test(trimmed));
 }
 
 function vaultState(config: VaultConfig): VaultConfigMutationResult["vaultState"] {
