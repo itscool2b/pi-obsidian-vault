@@ -1,5 +1,5 @@
-import { StringEnum } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 import { Type } from "typebox";
 import { editStatusFromConfig, forgetRememberedVaultPath, loadConfig, manageStatusFromConfig, rememberedVaultStatus, setRememberedVaultPath, statusFromConfig, writeStatusFromConfig, type LoadConfigOptions, type VaultConfig, type VaultStatus } from "./config.js";
